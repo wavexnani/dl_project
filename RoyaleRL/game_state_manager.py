@@ -20,18 +20,23 @@ class GameStateManager:
 
     def _load_anchors(self):
         anchor_path = "sorted_data/anchors/"
-        anchor_files = {
-            "MAIN_MENU": "battle_anchor.png",
-            "IN_BATTLE": "game_anchor.png",
-            "POST_BATTLE": "ok_anchor.png",
+        # Screen-state anchors used in get_state() for navigation
+        screen_state_files = {
+            "MAIN_MENU":    "battle_anchor.png",
+            "IN_BATTLE":    "game_anchor.png",
+            "POST_BATTLE":  "ok_anchor.png",
             "POST_BATTLE_2": "ok_anchor2.png",
-            "WIN_CROWN": "bluecrowns.png",
-            "LOSE_CROWN": "redcrowns.png",
-            "LUCKY_BOX": "luckybox2.png"
+            "LUCKY_BOX":    "luckybox2.png"
+        }
+        # Crown templates — kept separate, NOT used in get_state()
+        crown_files = {
+            "WIN_CROWN":  "bluecrowns.png",
+            "LOSE_CROWN": "redcrowns.png"
         }
 
+        all_files = {**screen_state_files, **crown_files}
         anchors = {}
-        for state, filename in anchor_files.items():
+        for state, filename in all_files.items():
             path = os.path.join(anchor_path, filename)
             if not os.path.exists(path):
                 base, ext = os.path.splitext(filename)
@@ -40,19 +45,21 @@ class GameStateManager:
                     path = alt
             if os.path.exists(path):
                 anchors[state] = self.scaler.scale_template(path)
+
+        # Store screen-state anchors separately so get_state() never returns WIN_CROWN/LOSE_CROWN
+        self._screen_state_keys = list(screen_state_files.keys())
         return anchors
 
     def get_state(self):
-        # Grab screenshot of only the game area for efficiency
+        """Returns screen navigation state (never returns WIN_CROWN/LOSE_CROWN)."""
         game_area_rect = self.scaler.game_area_rect
-        
-        # format the bounding box for ImageGrab.grab()
         bbox = (game_area_rect[0], game_area_rect[1], game_area_rect[0] + game_area_rect[2], game_area_rect[1] + game_area_rect[3])
-        
         screen_pil = ImageGrab.grab(bbox=bbox)
         screen_cv_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
 
-        for state, anchor_img in self.anchors.items():
+        # Only iterate over SCREEN STATE anchors — never crown templates
+        for state in self._screen_state_keys:
+            anchor_img = self.anchors.get(state)
             if anchor_img is None: continue
             res = cv2.matchTemplate(screen_cv_gray, anchor_img, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
@@ -272,35 +279,45 @@ class GameStateManager:
           3. Tower damage and King Tower destruction ground-truth fallback.
         Returns: (match_result, my_crowns, op_crowns, final_reward)
         """
-        print("⏳ [RESULT] Waiting for post-battle screen to appear...")
+        print("⏳ [RESULT] Waiting for battle to fully end and crown screen to appear...")
         max_my_crowns = 0
         max_op_crowns = 0
-        post_battle_found = False
 
+        # Phase 1: Wait up to 8 seconds for battle to transition away from IN_BATTLE
         start_wait = time.time()
-        while time.time() - start_wait < 7.0:
+        while time.time() - start_wait < 8.0:
             st = self.get_state()
-            if st in ("POST_BATTLE", "POST_BATTLE_2"):
-                post_battle_found = True
+            if st != "IN_BATTLE":
+                print(f"   Transition detected → state: {st}")
                 break
-            time.sleep(0.4)
+            time.sleep(0.3)
 
-        if post_battle_found:
-            # Allow crown drop animations to finish
-            time.sleep(1.2)
-            # Sample across multiple frames to catch animated crowns
-            for _ in range(4):
-                game_area = scaler.game_area_rect
-                bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
-                screen_pil = ImageGrab.grab(bbox=bbox)
-                c_me, c_op = self.get_crown_counts(screen_pil)
-                if c_me > max_my_crowns:
-                    max_my_crowns = c_me
-                if c_op > max_op_crowns:
-                    max_op_crowns = c_op
-                if max_my_crowns == 3:
-                    break
-                time.sleep(0.4)
+        # Phase 2: Allow crown drop animations to finish (they animate for ~1.5s in Clash Royale)
+        time.sleep(1.8)
+
+        # Phase 3: Multi-frame crown sampling — always attempt regardless of state
+        print("🔍 [RESULT] Scanning for crowns across 5 frames...")
+        for attempt in range(5):
+            game_area = scaler.game_area_rect
+            bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
+            screen_pil = ImageGrab.grab(bbox=bbox)
+            # Save the first debug screenshot for diagnostics
+            if attempt == 0:
+                try:
+                    import cv2 as _cv2
+                    _cv2.imwrite("crown_detect_debug.png", _cv2.cvtColor(__import__('numpy').array(screen_pil), _cv2.COLOR_RGB2BGR))
+                except Exception:
+                    pass
+            c_me, c_op = self.get_crown_counts(screen_pil)
+            print(f"   Frame {attempt+1}: me={c_me} op={c_op}")
+            if c_me > max_my_crowns:
+                max_my_crowns = c_me
+            if c_op > max_op_crowns:
+                max_op_crowns = c_op
+            if max_my_crowns == 3:
+                break
+            time.sleep(0.5)
+
 
         # Fallback: Assess cumulative damage from the battle steps if visual detection was inconclusive
         if max_my_crowns == 0 and max_op_crowns == 0 and battle_steps:
