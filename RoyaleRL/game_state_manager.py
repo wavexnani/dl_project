@@ -390,11 +390,9 @@ class GameStateManager:
             elif '1' in cleaned and winner_crowns is None:
                 winner_crowns = 1
 
-        # Fallback crown check: Clash Royale King Tower Rule
-        # In Clash Royale ladder matches, if a match ends before 3 minutes (180s),
-        # it is physically guaranteed that a King Tower was destroyed = 3 CROWNS!
+        # Default to 1 crown (standard win) unless 2 or 3 is explicitly detected in winner tokens
         if winner_crowns is None:
-            winner_crowns = 3
+            winner_crowns = 1
 
         # Phase 3: Final Outcome & Crown Assignment
         if ocr_result == "WIN":
