@@ -1,12 +1,16 @@
 venv/
 __pycache__/
 *.pyc
-*.png
-*.PNG
-*.pkl
-*.pt
-*.pth
 *.log
 RoyaleRL/__pycache__/
-RoyaleRL/presentation/
-RoyaleRL/training_stats.json
+
+# Debug images
+RoyaleRL/*debug*.png
+
+# Preserve presentation plots
+!RoyaleRL/presentation/**
+
+# Allow specific training artifacts
+!RoyaleRL/training_stats.json
+!RoyaleRL/replay_buffer.pkl
+
