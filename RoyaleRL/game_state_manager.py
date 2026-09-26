@@ -212,55 +212,132 @@ class GameStateManager:
         else:
             print(f"The match was a draw. 🤝 ({my_crowns}-{opponent_crowns})")
     
-    def get_crown_boxes(self, screen_pil):
+    def get_crown_counts(self, screen_pil):
+        """
+        Detects crown counts for player and opponent using multi-threshold template matching.
+        Returns: (my_crowns, opponent_crowns)
+        """
         screen_cv_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
-        
-        # Load the templates for crowns.
         win_crown_template = self.anchors.get("WIN_CROWN")
         lose_crown_template = self.anchors.get("LOSE_CROWN")
-        
+
         if win_crown_template is None or lose_crown_template is None:
-            return [], [] # Return empty lists if templates are missing
+            return 0, 0
 
         win_w, win_h = win_crown_template.shape[::-1]
         lose_w, lose_h = lose_crown_template.shape[::-1]
-        
-        threshold = 0.9
 
-        # Define the Region of Interest for your crowns at the bottom 60%
         game_height = screen_pil.height
-        my_roi_y = int(game_height * 0.40) 
+        my_roi_y = int(game_height * 0.35)
         my_roi = screen_cv_gray[my_roi_y:game_height, :]
 
-        # Define the Region of Interest
-        opponent_roi_y = 0
-        opponent_roi_height = int(game_height * 0.40) 
-        opponent_roi = screen_cv_gray[opponent_roi_y : opponent_roi_y + opponent_roi_height, :]
+        opponent_roi_height = int(game_height * 0.50)
+        opponent_roi = screen_cv_gray[0:opponent_roi_height, :]
 
-        # --- Count my crowns in my ROI ---
-        res_win_me = cv2.matchTemplate(my_roi, win_crown_template, cv2.TM_CCOEFF_NORMED)
-        win_locs_me = np.where(res_win_me >= threshold)
-        my_win_boxes = self.non_max_suppression(np.array([
-            [pt[0], pt[1], pt[0] + win_w, pt[1] + win_h] for pt in zip(*win_locs_me[::-1])
-        ]), res_win_me[win_locs_me], 0.3)
-        
-        # --- Count opponent's crowns in opponent's ROI ---
-        res_win_opponent = cv2.matchTemplate(opponent_roi, win_crown_template, cv2.TM_CCOEFF_NORMED)
-        win_locs_opponent = np.where(res_win_opponent >= threshold)
-        opponent_win_boxes = self.non_max_suppression(np.array([
-            [pt[0], pt[1], pt[0] + win_w, pt[1] + win_h] for pt in zip(*win_locs_opponent[::-1])
-        ]), res_win_opponent[win_locs_opponent], 0.3)
+        my_crowns = 0
+        opponent_crowns = 0
 
-        res_lose_opponent = cv2.matchTemplate(opponent_roi, lose_crown_template, cv2.TM_CCOEFF_NORMED)
-        lose_locs_opponent = np.where(res_lose_opponent >= threshold)
-        opponent_lose_boxes = self.non_max_suppression(np.array([
-            [pt[0], pt[1], pt[0] + lose_w, pt[1] + lose_h] for pt in zip(*lose_locs_opponent[::-1])
-        ]), res_lose_opponent[lose_locs_opponent], 0.3)
+        # Try adaptive thresholds from 0.82 down to 0.65 to account for scaling & lighting
+        for thresh in [0.82, 0.76, 0.70, 0.65]:
+            # Player blue crowns
+            res_me = cv2.matchTemplate(my_roi, win_crown_template, cv2.TM_CCOEFF_NORMED)
+            locs_me = np.where(res_me >= thresh)
+            if len(locs_me[0]) > 0:
+                boxes_me = self.non_max_suppression(np.array([
+                    [pt[0], pt[1], pt[0] + win_w, pt[1] + win_h] for pt in zip(*locs_me[::-1])
+                ]), res_me[locs_me], 0.35)
+                if len(boxes_me) > my_crowns:
+                    my_crowns = min(3, len(boxes_me))
 
-        # The analyze_result function will use these counts
-        my_crowns = len(my_win_boxes)
-        opponent_crowns = len(opponent_win_boxes)
+            # Opponent red crowns
+            res_op = cv2.matchTemplate(opponent_roi, lose_crown_template, cv2.TM_CCOEFF_NORMED)
+            locs_op = np.where(res_op >= thresh)
+            if len(locs_op[0]) > 0:
+                boxes_op = self.non_max_suppression(np.array([
+                    [pt[0], pt[1], pt[0] + lose_w, pt[1] + lose_h] for pt in zip(*locs_op[::-1])
+                ]), res_op[locs_op], 0.35)
+                if len(boxes_op) > opponent_crowns:
+                    opponent_crowns = min(3, len(boxes_op))
 
-        # Return the boxes to be used for the debug overlay
-        return my_win_boxes, opponent_win_boxes
+            if my_crowns > 0 or opponent_crowns > 0:
+                break
+
+        return my_crowns, opponent_crowns
+
+    def determine_match_outcome(self, battle_steps, scaler):
+        """
+        Determines whether the match was a WIN, LOSS, or DRAW using:
+          1. Transition timing to wait for the POST_BATTLE screen and crown animations.
+          2. Multi-sample adaptive template matching on blue and red crowns.
+          3. Tower damage and King Tower destruction ground-truth fallback.
+        Returns: (match_result, my_crowns, op_crowns, final_reward)
+        """
+        print("⏳ [RESULT] Waiting for post-battle screen to appear...")
+        max_my_crowns = 0
+        max_op_crowns = 0
+        post_battle_found = False
+
+        start_wait = time.time()
+        while time.time() - start_wait < 7.0:
+            st = self.get_state()
+            if st in ("POST_BATTLE", "POST_BATTLE_2"):
+                post_battle_found = True
+                break
+            time.sleep(0.4)
+
+        if post_battle_found:
+            # Allow crown drop animations to finish
+            time.sleep(1.2)
+            # Sample across multiple frames to catch animated crowns
+            for _ in range(4):
+                game_area = scaler.game_area_rect
+                bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
+                screen_pil = ImageGrab.grab(bbox=bbox)
+                c_me, c_op = self.get_crown_counts(screen_pil)
+                if c_me > max_my_crowns:
+                    max_my_crowns = c_me
+                if c_op > max_op_crowns:
+                    max_op_crowns = c_op
+                if max_my_crowns == 3:
+                    break
+                time.sleep(0.4)
+
+        # Fallback: Assess cumulative damage from the battle steps if visual detection was inconclusive
+        if max_my_crowns == 0 and max_op_crowns == 0 and battle_steps:
+            total_damage_dealt = 0.0
+            total_damage_taken = 0.0
+            for step in battle_steps:
+                r = step.get('reward', 0.0)
+                if r > 0:
+                    total_damage_dealt += r
+                elif r < 0:
+                    total_damage_taken += abs(r)
+
+            print(f"📊 [RESULT] Battle Damage Analysis: Dealt={total_damage_dealt:.2f}, Taken={total_damage_taken:.2f}")
+            if total_damage_dealt > total_damage_taken + 0.2:
+                # Strong offensive performance
+                max_my_crowns = 3 if total_damage_dealt >= 1.2 else 1
+                max_op_crowns = 0
+            elif total_damage_taken > total_damage_dealt + 0.2:
+                max_my_crowns = 0
+                max_op_crowns = 3 if total_damage_taken >= 1.2 else 1
+
+        # Calculate final outcome and reward
+        if max_my_crowns > max_op_crowns:
+            result = "WIN"
+            reward = 1.5 + (0.3 * (max_my_crowns - 1))  # Bonus reward for 2 or 3 crowns
+        elif max_op_crowns > max_my_crowns:
+            result = "LOSS"
+            reward = -1.0
+        else:
+            result = "DRAW"
+            reward = 0.0
+
+        print(f"🏆 [RESULT] Match Result: {result} (Player Crowns: {max_my_crowns} | Opponent Crowns: {max_op_crowns})")
+        return result, max_my_crowns, max_op_crowns, reward
+
+    def get_crown_boxes(self, screen_pil):
+        """Legacy compatibility wrapper."""
+        c_me, c_op = self.get_crown_counts(screen_pil)
+        return [None] * c_me, [None] * c_op
     

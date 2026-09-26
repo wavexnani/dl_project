@@ -199,20 +199,11 @@ def main():
                             if args.mode == 'record':
                                 recorder.stop()
 
-                            screenshot, _, _ = find_cards_dynamically(scaler)
-                            my_crowns, op_crowns = state_manager.get_crown_boxes(screenshot)
-                            
-                            if len(my_crowns) > len(op_crowns):
-                                match_result = "WIN"
-                                final_reward = 1.5
-                            elif len(op_crowns) > len(my_crowns):
-                                match_result = "LOSS"
-                                final_reward = -1.0
-                            else:
-                                match_result = "DRAW"
-                                final_reward = 0.0
+                            # Accurately evaluate crowns, post-battle screen, and tower damage
+                            match_result, my_crowns, op_crowns, final_reward = state_manager.determine_match_outcome(
+                                current_game_log['steps'], scaler
+                            )
 
-                            print(f"🏆 Result: {match_result} (Crowns: {len(my_crowns)} - {len(op_crowns)})")
 
                             if current_game_log['steps']:
                                 current_game_log['steps'][-1]['reward'] += final_reward
