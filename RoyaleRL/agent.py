@@ -139,8 +139,28 @@ class Agent:
             'rewards': self.replay_buffer.rewards[:sz],
             'next_states': self.replay_buffer.next_states[:sz]
         }
-        with open(self.buffer_path, 'wb') as f:
-            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        temp_path = f"{self.buffer_path}.tmp"
+        saved = False
+        for attempt in range(5):
+            try:
+                with open(temp_path, 'wb') as f:
+                    pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+                if os.path.exists(self.buffer_path):
+                    try:
+                        os.remove(self.buffer_path)
+                    except Exception:
+                        pass
+                os.replace(temp_path, self.buffer_path)
+                saved = True
+                break
+            except Exception:
+                time.sleep(0.2)
+        if not saved:
+            try:
+                with open(self.buffer_path, 'wb') as f:
+                    pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            except Exception as e:
+                print(f"⚠️ [WARNING] Could not save replay buffer ({e}).")
         print(f"Replay buffer saved ({sz} items, compact format).")
 
     def load_buffer(self):
@@ -323,6 +343,7 @@ class Agent:
                 self.save(f"rl_agent_epoch_{epoch+1}.pt")
                 
         print(f"Training complete in {(time.time() - start_time) / 60:.1f}m")
+        self.save(self.model_path)
         self.save("rl_agent_final.pt")
 
     def update_match_stats(self, match_result, final_reward):
@@ -374,8 +395,29 @@ class Agent:
 
     def save(self, path=None):
         save_path = path if path is not None else self.model_path
-        torch.save(self.model.state_dict(), save_path)
-        print(f"Agent model saved to {save_path}")
+        temp_path = f"{save_path}.tmp"
+        saved = False
+        for attempt in range(5):
+            try:
+                torch.save(self.model.state_dict(), temp_path)
+                if os.path.exists(save_path):
+                    try:
+                        os.remove(save_path)
+                    except Exception:
+                        pass
+                os.replace(temp_path, save_path)
+                saved = True
+                break
+            except Exception:
+                time.sleep(0.25)
+        if not saved:
+            try:
+                torch.save(self.model.state_dict(), save_path)
+                saved = True
+            except Exception as e:
+                print(f"⚠️ [WARNING] Windows file lock prevented writing to {save_path}: {e}. Model weights remain safe in GPU memory.")
+        if saved:
+            print(f"Agent model saved to {save_path}")
 
     def load(self):
         if os.path.exists(self.model_path):
