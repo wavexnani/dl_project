@@ -7,7 +7,7 @@ CLASS_NAMES_PATH = "class_names.txt"
 REFERENCE_RESOLUTION = (565, 1007)
 # --- Image Processing Constants ---
 IMG_SIZE = 128
-ARENA_BBOX = (0.4490, 0.1298, 0.6990, 0.7529)
+ARENA_BBOX = (0.04, 0.10, 0.96, 0.82)
 # --- Offsets for OCR 
 # These are the relative positions of all OCR regions
 OCR_OFFSETS = [

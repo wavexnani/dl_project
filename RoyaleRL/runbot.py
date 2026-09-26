@@ -248,6 +248,7 @@ def main():
                                     'state': last_state, 'action': action,
                                     'reward': reward, 'next_state': current_game_state
                                 })
+                                action = None
 
                             if args.mode == 'record':
                                 # Human Teacher Mode: User plays, recorder captures moves
@@ -255,7 +256,7 @@ def main():
                                 if human_action:
                                     action = human_action
                                     last_state = current_game_state
-                                time.sleep(0.3)
+                                time.sleep(0.15)
                                 continue
 
                             # Autonomous AI Mode: Decision Transformer decides action

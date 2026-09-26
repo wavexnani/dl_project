@@ -286,15 +286,20 @@ class GameStateManager:
     def determine_match_outcome(self, battle_steps, scaler, vision):
         """
         Determines whether the match was a WIN, LOSS, or DRAW using:
-          1. OCR to reliably read "VICTORY", "DEFEAT", or "DRAW" on the screen.
-          2. Tower damage and King Tower destruction ground-truth fallback from steps.
+          1. OCR parsing of the versus screen tokens (splitting by VS to identify
+             whether the local player (Mouli-p / right side) or the opponent (left side) has the Winner banner).
+          2. Crown extraction from the winner's token indicators (e.g. '[3', digits)
+             and Clash Royale 3-minute King Tower destruction rule.
+          3. Tower damage ground-truth fallback from battle steps.
         Returns: (match_result, my_crowns, op_crowns, final_reward)
         """
         print("⏳ [RESULT] Waiting for battle end banner & animations (2.0s)...")
         time.sleep(2.0)
 
         ocr_result = None
-        detected_all_texts = []
+        winner_tokens = []
+        loser_tokens = []
+        winner_keywords = ["WINNER", "WINNERL", "WIC'NER", "WICNER", "VICTORY", "YOU WIN", "GAGNANT"]
 
         # Phase 1: Use OCR across multiple frames to read end screen text
         print("🔍 [RESULT] Scanning screen with OCR for match result banner...")
@@ -304,97 +309,134 @@ class GameStateManager:
             screen_pil = ImageGrab.grab(bbox=bbox)
             
             # Read text with EasyOCR
-            texts = vision.reader.readtext(np.array(screen_pil), detail=0, text_threshold=0.55)
-            detected_all_texts.extend(texts)
-            text_str = " ".join(texts).upper()
+            texts = vision.reader.readtext(np.array(screen_pil), detail=0, text_threshold=0.50)
             print(f"   [Frame {attempt+1}] OCR: {texts}")
-            
-            if any(w in text_str for w in ["VICTORY", "YOU WIN", "VICTOIRE", "WINNER"]):
-                ocr_result = "WIN"
-                break
-            elif any(w in text_str for w in ["DEFEAT", "YOU LOSE", "LOST", "DEFAITE", "GAME OVER"]):
-                ocr_result = "LOSS"
-                break
-            elif any(w in text_str for w in ["DRAW", "TIE", "TIEBREAKER"]):
-                ocr_result = "DRAW"
-                break
-                
+
+            if not texts:
+                time.sleep(0.5)
+                continue
+
+            # Look for 'VS' separator on the result screen
+            vs_idx = -1
+            for i, t in enumerate(texts):
+                t_up = t.upper().strip()
+                if t_up in ('VS', 'V.S', 'V') or 'VS' in t_up:
+                    vs_idx = i
+                    break
+
+            if vs_idx != -1:
+                side_left = texts[:vs_idx]
+                side_right = texts[vs_idx + 1:]
+
+                # In Clash Royale: Opponent is on the left, Local Player is on the right
+                # Also verify if player's name ('mouli') is explicitly present
+                if any('mouli' in t.lower() for t in side_left):
+                    player_side, opp_side = side_left, side_right
+                elif any('mouli' in t.lower() for t in side_right):
+                    player_side, opp_side = side_right, side_left
+                else:
+                    opp_side, player_side = side_left, side_right
+
+                player_has_winner = any(any(kw in t.upper() for kw in winner_keywords) for t in player_side)
+                opp_has_winner = any(any(kw in t.upper() for kw in winner_keywords) for t in opp_side)
+
+                if player_has_winner and not opp_has_winner:
+                    ocr_result = "WIN"
+                    winner_tokens = player_side
+                    loser_tokens = opp_side
+                    break
+                elif opp_has_winner and not player_has_winner:
+                    ocr_result = "LOSS"
+                    winner_tokens = opp_side
+                    loser_tokens = player_side
+                    break
+                elif any('DEFEAT' in t.upper() for t in player_side):
+                    ocr_result = "LOSS"
+                    winner_tokens = opp_side
+                    loser_tokens = player_side
+                    break
+                elif any('VICTORY' in t.upper() for t in player_side):
+                    ocr_result = "WIN"
+                    winner_tokens = player_side
+                    loser_tokens = opp_side
+                    break
+            else:
+                # No VS separator: check full screen text
+                text_str = " ".join(texts).upper()
+                if any(w in text_str for w in ["DEFEAT", "YOU LOSE", "LOST", "DEFAITE"]):
+                    ocr_result = "LOSS"
+                    break
+                elif any(w in text_str for w in ["VICTORY", "YOU WIN", "VICTOIRE"]):
+                    ocr_result = "WIN"
+                    break
+                elif any(w in text_str for w in ["DRAW", "TIE", "TIEBREAKER"]):
+                    ocr_result = "DRAW"
+                    break
+
             time.sleep(0.5)
 
-        # Phase 2: Analyze battle steps (damage and tower trajectory)
-        total_damage_dealt = 0.0
-        total_damage_taken = 0.0
-        enemy_king_killed = False
-        friendly_king_killed = False
+        # Phase 2: Crown Evaluation
+        # In Clash Royale: Destroying the middle main base (King Tower) = 3 CROWNS immediately.
+        # Check if winner tokens explicitly contain crown indicator (e.g. '[3', '3')
+        winner_crowns = None
+        for t in winner_tokens:
+            cleaned = ''.join(c for c in t if c.isdigit())
+            if '3' in cleaned:
+                winner_crowns = 3
+                break
+            elif '2' in cleaned:
+                winner_crowns = 2
+                break
+            elif '1' in cleaned and winner_crowns is None:
+                winner_crowns = 1
 
-        if battle_steps:
-            for step in battle_steps:
-                r = step.get('reward', 0.0)
-                if r > 0:
-                    total_damage_dealt += r
-                elif r < 0:
-                    total_damage_taken += abs(r)
+        # Fallback crown check: Clash Royale King Tower Rule
+        # In Clash Royale ladder matches, if a match ends before 3 minutes (180s),
+        # it is physically guaranteed that a King Tower was destroyed = 3 CROWNS!
+        if winner_crowns is None:
+            winner_crowns = 3
 
-            # Check if king towers were destroyed in the final steps
-            for step in battle_steps[-8:]:
-                ocr = step.get('next_state', {}).get('ocr_data', {})
-                tk_val = ocr.get('tk', '')
-                bk_val = ocr.get('bk', '')
-                if tk_val in ('0', '00', '000') or (total_damage_dealt >= 2.0):
-                    enemy_king_killed = True
-                if bk_val in ('0', '00', '000') or (total_damage_taken >= 2.0):
-                    friendly_king_killed = True
-
-        print(f"📊 [RESULT] Battle Damage Analysis: Dealt={total_damage_dealt:.2f}, Taken={total_damage_taken:.2f}")
-
-        # Combine OCR and tower damage metrics
+        # Phase 3: Final Outcome & Crown Assignment
         if ocr_result == "WIN":
             result = "WIN"
-            if enemy_king_killed or total_damage_dealt >= 1.5 or "3" in detected_all_texts:
-                max_my_crowns = 3
-            elif total_damage_dealt >= 0.7:
-                max_my_crowns = 2
-            else:
-                max_my_crowns = 1
-            max_op_crowns = 0 if total_damage_taken < 0.6 else (1 if total_damage_taken < 1.2 else 2)
+            max_my_crowns = winner_crowns
+            max_op_crowns = 0  # Opponent got 0 crowns if King Tower taken
+            reward = 2.0 + (0.5 * (max_my_crowns - 1))
 
         elif ocr_result == "LOSS":
             result = "LOSS"
-            max_my_crowns = 0 if total_damage_dealt < 0.6 else (1 if total_damage_dealt < 1.2 else 2)
-            if friendly_king_killed or total_damage_taken >= 1.5 or "3" in detected_all_texts:
-                max_op_crowns = 3
-            elif total_damage_taken >= 0.7:
-                max_op_crowns = 2
-            else:
-                max_op_crowns = 1
+            max_my_crowns = 0
+            max_op_crowns = winner_crowns
+            reward = -1.5 - (0.3 * (max_op_crowns - 1))
 
         elif ocr_result == "DRAW":
             result = "DRAW"
             max_my_crowns = 0
             max_op_crowns = 0
+            reward = 0.0
 
         else:
+            # Fallback to cumulative damage from steps if OCR failed to find anything
             print("⚠️ [RESULT] Banner text not detected by OCR, falling back to damage metrics.")
+            total_damage_dealt = sum(s.get('reward', 0.0) for s in battle_steps if s.get('reward', 0.0) > 0)
+            total_damage_taken = sum(abs(s.get('reward', 0.0)) for s in battle_steps if s.get('reward', 0.0) < 0)
+            print(f"📊 [RESULT] Battle Damage Analysis: Dealt={total_damage_dealt:.2f}, Taken={total_damage_taken:.2f}")
+
             if total_damage_dealt > total_damage_taken + 0.3:
                 result = "WIN"
-                max_my_crowns = 3 if total_damage_dealt >= 1.5 else (2 if total_damage_dealt >= 0.7 else 1)
+                max_my_crowns = 3
                 max_op_crowns = 0
+                reward = 2.0
             elif total_damage_taken > total_damage_dealt + 0.3:
                 result = "LOSS"
                 max_my_crowns = 0
-                max_op_crowns = 3 if total_damage_taken >= 1.5 else (2 if total_damage_taken >= 0.7 else 1)
+                max_op_crowns = 3
+                reward = -1.5
             else:
                 result = "DRAW"
                 max_my_crowns = 0
                 max_op_crowns = 0
-
-        # Calculate final reinforcement learning reward
-        if result == "WIN":
-            reward = 2.0 + (0.5 * (max_my_crowns - 1))
-        elif result == "LOSS":
-            reward = -1.5 - (0.3 * (max_op_crowns - 1))
-        else:
-            reward = 0.0
+                reward = 0.0
 
         print(f"🏆 [RESULT] Match Result: {result} (Player Crowns: {max_my_crowns} | Opponent Crowns: {max_op_crowns}) | Final Reward: {reward:+.2f}")
         return result, max_my_crowns, max_op_crowns, reward

@@ -78,8 +78,7 @@ class HumanRecorder:
         return None, None
 
     def _check_card_slot_clicked(self, rel_x, rel_y):
-        """Checks if relative click landed on one of the 4 card slots."""
-        # Scale card boxes to current resolution
+        """Checks if relative click landed on one of the 4 card slots (with margin)."""
         cur_w, cur_h = self.scaler.current_resolution
         ref_w, ref_h = config.REFERENCE_RESOLUTION
         sx = cur_w / ref_w
@@ -90,7 +89,8 @@ class HumanRecorder:
             scaled_by = by * sy
             scaled_bw = bw * sx
             scaled_bh = bh * sy
-            if scaled_bx <= rel_x <= scaled_bx + scaled_bw and scaled_by <= rel_y <= scaled_by + scaled_bh:
+            # Generous padding so clicking near card edge registers cleanly
+            if (scaled_bx - 15) <= rel_x <= (scaled_bx + scaled_bw + 15) and (scaled_by - 25) <= rel_y <= (scaled_by + scaled_bh + 25):
                 return slot_idx
         return None
 
@@ -103,36 +103,48 @@ class HumanRecorder:
         max_y = config.ARENA_BBOX[3] * cur_h
         return min_x <= rel_x <= max_x and min_y <= rel_y <= max_y
 
+    def _record_deploy(self, slot, rel_x, rel_y):
+        with self.lock:
+            action_record = {
+                'action': 'play_card',
+                'card_slot': slot,
+                'position': (int(rel_x), int(rel_y)),
+                'timestamp': time.time(),
+                'is_human': True
+            }
+            self.pending_actions.append(action_record)
+            print(f"🎯 [HUMAN MOVE] Card {slot + 1} deployed at arena ({int(rel_x)}, {int(rel_y)})")
+
     def _on_mouse_click(self, x, y, button, pressed):
-        if not self._is_recording or not pressed or button != mouse.Button.left:
+        if not self._is_recording or button != mouse.Button.left:
             return
 
         rel_x, rel_y = self._get_relative_coords(x, y)
         if rel_x is None:
             return
 
-        # Check if user clicked a card slot
-        slot_clicked = self._check_card_slot_clicked(rel_x, rel_y)
-        if slot_clicked is not None:
-            self.selected_slot = slot_clicked
-            self.last_selected_time = time.time()
-            return
+        if pressed:
+            # Mouse DOWN: check if a card slot was clicked
+            slot_clicked = self._check_card_slot_clicked(rel_x, rel_y)
+            if slot_clicked is not None:
+                self.selected_slot = slot_clicked
+                self.last_selected_time = time.time()
+                print(f"🃏 [HUMAN] Selected card slot {slot_clicked + 1}")
+                return
 
-        # Check if user clicked the arena to deploy
-        if self._is_in_arena(rel_x, rel_y):
-            # If a card was selected in the last 6 seconds
-            if self.selected_slot is not None and (time.time() - self.last_selected_time) < 6.0:
-                with self.lock:
-                    action_record = {
-                        'action': 'play_card',
-                        'card_slot': self.selected_slot,
-                        'position': (int(rel_x), int(rel_y)),
-                        'timestamp': time.time(),
-                        'is_human': True
-                    }
-                    self.pending_actions.append(action_record)
-                    print(f"🎯 [HUMAN MOVE] Slot {self.selected_slot + 1} deployed at ({rel_x}, {rel_y})")
-                self.selected_slot = None  # Reset after placement
+            # Mouse DOWN: if card was already selected and clicked in arena
+            if self.selected_slot is not None and self._is_in_arena(rel_x, rel_y):
+                if (time.time() - self.last_selected_time) < 6.0:
+                    self._record_deploy(self.selected_slot, rel_x, rel_y)
+                    self.selected_slot = None
+                    return
+        else:
+            # Mouse UP (Release): Supports DRAG-AND-DROP from card slot into arena!
+            if self.selected_slot is not None and self._is_in_arena(rel_x, rel_y):
+                if (time.time() - self.last_selected_time) < 6.0:
+                    self._record_deploy(self.selected_slot, rel_x, rel_y)
+                    self.selected_slot = None
+                    return
 
     def _on_key_press(self, key):
         if not self._is_recording:
