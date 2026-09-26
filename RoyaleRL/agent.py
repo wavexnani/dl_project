@@ -7,7 +7,9 @@ import os
 import random
 import config
 from config import get_health_percentage, CARD_TO_INDEX, NUM_CARD_TYPES, ALL_CARDS, ARENA_BBOX
+import json
 import pickle
+
 # Define the 18x30 placement grid
 x_steps = 18
 y_steps = 30
@@ -120,24 +122,43 @@ class Agent:
         ).to(device)
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         
-        self.replay_buffer = ReplayBuffer(1e5, self.state_dim, self.action_dim)
-        self.load()
         self.buffer_path = 'replay_buffer.pkl' 
         self.replay_buffer = ReplayBuffer(1e5, self.state_dim, self.action_dim)
-        
+        self.load()
         if os.path.exists(self.buffer_path):
             self.load_buffer()
     
     def save_buffer(self):
+        sz = self.replay_buffer.size
+        data = {
+            'format': 'compact_v2',
+            'ptr': self.replay_buffer.ptr,
+            'size': sz,
+            'states': self.replay_buffer.states[:sz],
+            'actions': self.replay_buffer.actions[:sz],
+            'rewards': self.replay_buffer.rewards[:sz],
+            'next_states': self.replay_buffer.next_states[:sz]
+        }
         with open(self.buffer_path, 'wb') as f:
-            pickle.dump(self.replay_buffer, f)
-        print("Replay buffer saved.")
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"Replay buffer saved ({sz} items, compact format).")
 
     def load_buffer(self):
         try:
             with open(self.buffer_path, 'rb') as f:
-                self.replay_buffer = pickle.load(f)
-            print(f"Replay buffer loaded with {self.replay_buffer.size} items.")
+                loaded = pickle.load(f)
+            if isinstance(loaded, dict) and 'states' in loaded:
+                sz = loaded['size']
+                self.replay_buffer.size = sz
+                self.replay_buffer.ptr = loaded['ptr']
+                self.replay_buffer.states[:sz] = loaded['states']
+                self.replay_buffer.actions[:sz] = loaded['actions']
+                self.replay_buffer.rewards[:sz] = loaded['rewards']
+                self.replay_buffer.next_states[:sz] = loaded['next_states']
+                print(f"Replay buffer loaded with {sz} items (compact).")
+            elif hasattr(loaded, 'size'):
+                self.replay_buffer = loaded
+                print(f"Replay buffer loaded with {self.replay_buffer.size} items (legacy).")
         except Exception as e:
             print(f"Could not load replay buffer: {e}")
             print("Starting with a new, empty buffer.")
@@ -208,23 +229,32 @@ class Agent:
         return {'action': 'play_card', 'card_slot': card_slot_index, 'position': (placement_x, placement_y)}
 
     def _get_model_action(self, game_state, scaler):
+        hand = game_state.get('hand', [])
+        elixir = game_state.get('elixir', 0)
+        playable_cards = [i for i, card in enumerate(hand) if card in self.card_costs and elixir >= self.card_costs[card]]
+        if not playable_cards:
+            return None
+
         state_vec = self._flatten_state(game_state)
         state_tensor = torch.tensor(state_vec, dtype=torch.float32).reshape(1, 1, self.state_dim).to(self.device)
         
         action_tensor = torch.zeros((1, 1, self.action_dim), dtype=torch.float32).to(self.device)
-        reward_tensor = torch.zeros((1, 1, 1), dtype=torch.float32).to(self.device)
+        # Condition DT on a positive target return (aiming for victory)
+        reward_tensor = (torch.ones((1, 1, 1), dtype=torch.float32) * 2.0).to(self.device)
         timestep_tensor = torch.tensor([[self.replay_buffer.size % (self.context_len * 3)]], dtype=torch.long).to(self.device)
 
         self.model.eval()
         with torch.no_grad():
             action_preds = self.model(state_tensor, action_tensor, reward_tensor, timestep_tensor).squeeze(0).squeeze(0)
 
-        probabilities = F.softmax(action_preds, dim=0)
-        action_index = torch.argmax(probabilities).item()
+        # Mask logits so model selects the best placement among playable cards in hand
+        masked_preds = torch.full_like(action_preds, float('-inf'))
+        for slot in playable_cards:
+            start_idx = slot * NUM_GRID_LOCATIONS
+            end_idx = (slot + 1) * NUM_GRID_LOCATIONS
+            masked_preds[start_idx:end_idx] = action_preds[start_idx:end_idx]
 
-        if action_index >= NUM_CARD_TYPES * NUM_GRID_LOCATIONS:
-            print("Model chose 'do nothing'.")
-            return None
+        action_index = torch.argmax(masked_preds).item()
 
         card_slot_index = action_index // NUM_GRID_LOCATIONS
         grid_location_index = action_index % NUM_GRID_LOCATIONS
@@ -254,45 +284,93 @@ class Agent:
         
         print(f"LEARNING: Buffer size: {self.replay_buffer.size}. New epsilon: {self.epsilon:.3f}")
         self.save()
+        self.save_buffer()
 
     def train(self, num_epochs, batch_size):
-        if self.replay_buffer.size < 100: 
+        if self.replay_buffer.size < 50: 
             print("TRAINING: Not enough data in replay buffer to start training. Play more games.")
             return
         
-        print("Starting agent training...")
+        print(f"Starting agent training ({num_epochs} epochs on {self.replay_buffer.size} experiences)...")
         self.model.train()
         start_time = time.time()
         for epoch in range(num_epochs):
             epoch_loss = 0
-            for _ in range(100):
+            steps_per_epoch = min(100, max(10, self.replay_buffer.size // batch_size))
+            for _ in range(steps_per_epoch):
                 states, actions, rewards, timesteps = self.replay_buffer.sample(batch_size, self.context_len)
                 if states is None: continue
                 
                 states, actions, rewards, timesteps = states.to(self.device), actions.to(self.device), rewards.to(self.device), timesteps.to(self.device)
-                
                 one_hot_actions = F.one_hot(actions, num_classes=self.action_dim).float()
-                
                 action_preds = self.model(states, one_hot_actions, rewards, timesteps)
 
-                
-                # Use F.cross_entropy and actions as long tensors
-                loss = F.cross_entropy(action_preds.view(-1, self.action_dim), actions.view(-1))
+                # Reward-weighted cross-entropy: high weight on positive rewards, low on mistakes
+                loss_raw = F.cross_entropy(action_preds.view(-1, self.action_dim), actions.view(-1), reduction='none')
+                reward_flat = rewards.view(-1)
+                weights = torch.clamp(1.0 + reward_flat, min=0.2, max=3.0)
+                loss = (loss_raw * weights).mean()
 
-                
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 epoch_loss += loss.item()
 
-            avg_loss = epoch_loss / 100
+            avg_loss = epoch_loss / max(1, steps_per_epoch)
             print(f"Epoch {epoch+1}/{num_epochs} | Loss: {avg_loss:.4f}")
             
             if (epoch + 1) % 10 == 0:
                 self.save(f"rl_agent_epoch_{epoch+1}.pt")
                 
-        print(f"Training complete in {(time.time() - start_time) / 60:.0f}m")
+        print(f"Training complete in {(time.time() - start_time) / 60:.1f}m")
         self.save("rl_agent_final.pt")
+
+    def update_match_stats(self, match_result, final_reward):
+        """Logs and tracks cumulative and rolling win rate."""
+        stats_file = 'training_stats.json'
+        stats = {
+            'matches_played': 0,
+            'wins': 0,
+            'losses': 0,
+            'draws': 0,
+            'overall_win_rate': 0.0,
+            'rolling_win_rate_20': 0.0,
+            'history': []
+        }
+        if os.path.exists(stats_file):
+            try:
+                with open(stats_file, 'r') as f:
+                    stats = json.load(f)
+            except Exception:
+                pass
+
+        stats['matches_played'] += 1
+        if match_result == 'WIN':
+            stats['wins'] += 1
+        elif match_result == 'LOSS':
+            stats['losses'] += 1
+        else:
+            stats['draws'] += 1
+
+        stats['history'].append({
+            'match_num': stats['matches_played'],
+            'result': match_result,
+            'reward': final_reward,
+            'buffer_size': self.replay_buffer.size,
+            'epsilon': round(self.epsilon, 3),
+            'timestamp': time.time()
+        })
+        stats['history'] = stats['history'][-100:]
+
+        recent = stats['history'][-20:]
+        recent_wins = sum(1 for m in recent if m['result'] == 'WIN')
+        stats['rolling_win_rate_20'] = round((recent_wins / len(recent)) * 100, 1)
+        stats['overall_win_rate'] = round((stats['wins'] / stats['matches_played']) * 100, 1)
+
+        with open(stats_file, 'w') as f:
+            json.dump(stats, f, indent=2)
+
+        print(f"📊 [STATS] Match #{stats['matches_played']}: {match_result} | Overall Win Rate: {stats['overall_win_rate']}% | Rolling (Last 20): {stats['rolling_win_rate_20']}%")
 
     def save(self, path=None):
         save_path = path if path is not None else self.model_path
@@ -301,6 +379,18 @@ class Agent:
 
     def load(self):
         if os.path.exists(self.model_path):
-            self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
-            self.model.eval()
-            print(f"Agent model loaded from {self.model_path}")
+            try:
+                state_dict = torch.load(self.model_path, map_location=self.device)
+                self.model.load_state_dict(state_dict)
+                self.model.eval()
+                print(f"Agent model loaded from {self.model_path}")
+            except Exception as e:
+                print(f"Notice: Checkpoint layer mismatch ({e}).")
+                print("Transferring compatible transformer layers and reinitializing head for current action space...")
+                state_dict = torch.load(self.model_path, map_location=self.device)
+                model_dict = self.model.state_dict()
+                matched = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+                model_dict.update(matched)
+                self.model.load_state_dict(model_dict)
+                self.model.eval()
+                print(f"Loaded {len(matched)}/{len(model_dict)} compatible layers from checkpoint.")

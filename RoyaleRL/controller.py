@@ -5,6 +5,13 @@ import cv2
 import numpy as np
 from PIL import ImageGrab
 import config # Import the config
+import ctypes
+from ctypes import wintypes
+
+try:
+    ctypes.windll.user32.SetProcessDPIAware()
+except Exception:
+    pass
 
 class Controller:
     """Handles all mouse interactions with the game."""
@@ -13,16 +20,92 @@ class Controller:
         # Get the absolute offset of the game window once
         self.game_area_offset_x = self.scaler.game_area_rect[0]
         self.game_area_offset_y = self.scaler.game_area_rect[1]
+        
+        # Find BlueStacks Qt child window for direct PostMessage clicks
+        self.target_hwnd = self._find_target_hwnd()
         print("Controller initialized.")
+
+    def _find_target_hwnd(self):
+        try:
+            import pygetwindow as gw
+            bluestacks_windows = gw.getWindowsWithTitle('BlueStacks App Player')
+            if not bluestacks_windows:
+                all_w = gw.getAllWindows()
+                bluestacks_windows = [w for w in all_w if 'bluestacks' in w.title.lower()]
+            if not bluestacks_windows:
+                return None
+            
+            root_hwnd = bluestacks_windows[0]._hWnd
+            user32 = ctypes.windll.user32
+            children = []
+            def enum_cb(hwnd, lparam):
+                children.append(hwnd)
+                return True
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            user32.EnumChildWindows(root_hwnd, WNDENUMPROC(enum_cb), 0)
+            
+            for c in children:
+                c_name = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(c, c_name, 256)
+                if 'Qt' in c_name.value:
+                    return c
+            return root_hwnd
+        except Exception:
+            return None
 
     def click(self, x, y):
         """Moves to and clicks a given coordinate."""
+        user32 = ctypes.windll.user32
+        # Use PostMessage directly to the BlueStacks Qt window if available
+        if self.target_hwnd:
+            try:
+                lParam = ((int(y)) << 16) | (int(x) & 0xFFFF)
+                MK_LBUTTON = 0x0001
+                WM_LBUTTONDOWN = 0x0201
+                WM_LBUTTONUP = 0x0202
+                user32.PostMessageW(self.target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam)
+                time.sleep(0.12)
+                user32.PostMessageW(self.target_hwnd, WM_LBUTTONUP, 0, lParam)
+                time.sleep(0.3)
+                return
+            except Exception as e:
+                print(f"PostMessage click failed, falling back to pyautogui: {e}")
+
         # Convert relative game coordinates to absolute screen coordinates
         abs_x = self.game_area_offset_x + x
         abs_y = self.game_area_offset_y + y
         pyautogui.moveTo(abs_x, abs_y, duration=0.1)
         pyautogui.click()
         time.sleep(0.5)
+
+    def send_escape(self):
+        """Sends the Escape key to BlueStacks (acts as Android Back button)."""
+        VK_ESCAPE = 0x1B
+        WM_KEYDOWN = 0x0100
+        WM_KEYUP = 0x0101
+        if self.target_hwnd:
+            try:
+                user32 = ctypes.windll.user32
+                user32.PostMessageW(self.target_hwnd, WM_KEYDOWN, VK_ESCAPE, 0)
+                time.sleep(0.05)
+                user32.PostMessageW(self.target_hwnd, WM_KEYUP, VK_ESCAPE, 0)
+                print("🎮 [CONTROLLER] Sent Escape (Android Back) via PostMessage.")
+                return
+            except Exception:
+                pass
+        pyautogui.press('esc')
+        print("🎮 [CONTROLLER] Sent Escape (Android Back) via pyautogui.")
+
+    def dismiss_popups(self):
+        """Attempts to clear unknown dialogs, popups, or reward screens."""
+        print("🛡️ [WATCHDOG] Attempting to dismiss popup/stuck screen...")
+        self.send_escape()
+        time.sleep(0.5)
+        # Click center of game area to clear tap-to-continue prompts
+        gw, gh = self.scaler.current_resolution
+        self.click(int(gw * 0.5), int(gh * 0.75))
+        time.sleep(0.5)
+
 
     def play_card(self, card_slot_coords, placement_coords):
         """

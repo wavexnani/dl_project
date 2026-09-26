@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+*.png
+*.PNG
+*.pkl
+*.pt
+*.pth
+*.log
+RoyaleRL/__pycache__/
+RoyaleRL/presentation/
+RoyaleRL/training_stats.json

@@ -12,6 +12,9 @@ class GameStateManager:
         self.controller = controller
         self.scaler = scaler
         self.anchors = self._load_anchors()
+        self.state_start_time = time.time()
+        self.current_state = "UNKNOWN"
+        self.battle_start_time = None
         if self.anchors:
             print(f"Loaded {len(self.anchors)} state anchors.")
 
@@ -30,6 +33,11 @@ class GameStateManager:
         anchors = {}
         for state, filename in anchor_files.items():
             path = os.path.join(anchor_path, filename)
+            if not os.path.exists(path):
+                base, ext = os.path.splitext(filename)
+                alt = os.path.join(anchor_path, f"{base}{ext.upper()}")
+                if os.path.exists(alt):
+                    path = alt
             if os.path.exists(path):
                 anchors[state] = self.scaler.scale_template(path)
         return anchors
@@ -49,22 +57,68 @@ class GameStateManager:
             res = cv2.matchTemplate(screen_cv_gray, anchor_img, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
             if max_val > 0.85:
+                self._update_internal_state(state)
                 return state
+
+        self._update_internal_state("UNKNOWN")
         return "UNKNOWN"
+
+    def _update_internal_state(self, state):
+        if state != self.current_state:
+            self.current_state = state
+            self.state_start_time = time.time()
+            if state == "IN_BATTLE":
+                self.battle_start_time = time.time()
+            elif state in ("MAIN_MENU", "POST_BATTLE", "POST_BATTLE_2"):
+                self.battle_start_time = None
+
+    def check_and_recover_if_stuck(self, unknown_timeout=12, battle_timeout=280):
+        """
+        Watchdog routine:
+        1. If state is UNKNOWN for > unknown_timeout seconds, attempt popup dismissal.
+        2. If battle has exceeded battle_timeout (4.6m), flag battle timeout.
+        """
+        now = time.time()
+        elapsed = now - self.state_start_time
+
+        if self.current_state == "UNKNOWN" and elapsed > unknown_timeout:
+            print(f"🛡️ [WATCHDOG] Stuck in UNKNOWN state for {elapsed:.1f}s. Running popup dismissal...")
+            self.controller.dismiss_popups()
+            self.state_start_time = now # reset to give dismissal a chance
+            return "RECOVERED"
+
+        if self.current_state == "IN_BATTLE" and self.battle_start_time:
+            battle_duration = now - self.battle_start_time
+            if battle_duration > battle_timeout:
+                print(f"🛡️ [WATCHDOG] Battle exceeded maximum duration ({battle_duration:.1f}s). Flagging timeout.")
+                return "BATTLE_TIMEOUT"
+
+        return None
     
     def start_match(self):
         print("Attempting to start match...")
-        return self.controller.find_and_click('sorted_data/anchors/battle_anchor.png')
+        for name in ('sorted_data/anchors/battle_anchor.png', 'sorted_data/anchors/battle_anchor.PNG'):
+            if os.path.exists(name) and self.controller.find_and_click(name):
+                return True
+        return False
 
     def end_match(self):
         print("Attempting to end match...")
-        return self.controller.find_and_click('sorted_data/anchors/ok_anchor.png')
+        for name in ('sorted_data/anchors/ok_anchor.png', 'sorted_data/anchors/ok_anchor.PNG'):
+            if os.path.exists(name) and self.controller.find_and_click(name):
+                return True
+        return False
     
     def fix_bug(self):
         print("Attempting to fix...")
         for _ in range(5):
-            self.controller.find_and_click('sorted_data/anchors/luckybox2.png')
-        return self.controller.find_and_click('sorted_data/anchors/ok_anchor2.png')
+            for name in ('sorted_data/anchors/luckybox2.png', 'sorted_data/anchors/luckybox2.PNG'):
+                if os.path.exists(name) and self.controller.find_and_click(name):
+                    break
+        for name in ('sorted_data/anchors/ok_anchor2.png', 'sorted_data/anchors/ok_anchor2.PNG'):
+            if os.path.exists(name) and self.controller.find_and_click(name):
+                return True
+        return False
     
     def non_max_suppression(self, boxes, scores, overlapThresh):
         if len(boxes) == 0:
