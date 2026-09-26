@@ -222,11 +222,17 @@ class Vision:
         cv2.waitKey(1)
 
     def _get_ocr_values(self, screenshot):
-        """Performs OCR on all predefined regions."""
+        """Performs OCR on all predefined regions with resolution scaling and padding."""
         ocr_results = {}
+        img_w, img_h = screenshot.size
         for box in config.OCR_OFFSETS:
-            x, y, width, height = box['x_offset'], box['y_offset'], box['width'], box['height']
-            region_image = screenshot.crop((x, y, x + width, y + height))
+            x = max(0, int(box['x_offset'] * self.scaler.x_scale) - 8)
+            y = max(0, int(box['y_offset'] * self.scaler.y_scale) - 5)
+            w = int(box['width'] * self.scaler.x_scale) + 20
+            h = int(box['height'] * self.scaler.y_scale) + 25
+            x2 = min(img_w, x + w)
+            y2 = min(img_h, y + h)
+            region_image = screenshot.crop((x, y, x2, y2))
             img_np = np.array(region_image)
             result = self.reader.readtext(img_np, allowlist='0123456789:')
             text = ' '.join([res[1] for res in result]).strip()

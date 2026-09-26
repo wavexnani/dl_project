@@ -57,18 +57,30 @@ class GameStateManager:
         screen_pil = ImageGrab.grab(bbox=bbox)
         screen_cv_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
 
-        # Only iterate over SCREEN STATE anchors — never crown templates
+        STATE_THRESHOLDS = {
+            "IN_BATTLE": 0.68,
+            "POST_BATTLE": 0.75,
+            "POST_BATTLE_2": 0.75,
+            "MAIN_MENU": 0.80,
+            "LUCKY_BOX": 0.80
+        }
+
+        # Select the highest-confidence matching state above threshold
+        best_state = "UNKNOWN"
+        best_val = 0.0
+
         for state in self._screen_state_keys:
             anchor_img = self.anchors.get(state)
             if anchor_img is None: continue
+            thresh = STATE_THRESHOLDS.get(state, 0.80)
             res = cv2.matchTemplate(screen_cv_gray, anchor_img, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
-            if max_val > 0.85:
-                self._update_internal_state(state)
-                return state
+            if max_val >= thresh and max_val > best_val:
+                best_val = max_val
+                best_state = state
 
-        self._update_internal_state("UNKNOWN")
-        return "UNKNOWN"
+        self._update_internal_state(best_state)
+        return best_state
 
     def _update_internal_state(self, state):
         if state != self.current_state:
@@ -271,58 +283,51 @@ class GameStateManager:
 
         return my_crowns, opponent_crowns
 
-    def determine_match_outcome(self, battle_steps, scaler):
+    def determine_match_outcome(self, battle_steps, scaler, vision):
         """
         Determines whether the match was a WIN, LOSS, or DRAW using:
-          1. Transition timing to wait for the POST_BATTLE screen and crown animations.
-          2. Multi-sample adaptive template matching on blue and red crowns.
-          3. Tower damage and King Tower destruction ground-truth fallback.
+          1. OCR to reliably read "VICTORY", "DEFEAT", or "DRAW" on the screen.
+          2. Tower damage and King Tower destruction ground-truth fallback from steps.
         Returns: (match_result, my_crowns, op_crowns, final_reward)
         """
-        print("⏳ [RESULT] Waiting for battle to fully end and crown screen to appear...")
-        max_my_crowns = 0
-        max_op_crowns = 0
+        print("⏳ [RESULT] Waiting for battle end banner & animations (2.0s)...")
+        time.sleep(2.0)
 
-        # Phase 1: Wait up to 8 seconds for battle to transition away from IN_BATTLE
-        start_wait = time.time()
-        while time.time() - start_wait < 8.0:
-            st = self.get_state()
-            if st != "IN_BATTLE":
-                print(f"   Transition detected → state: {st}")
-                break
-            time.sleep(0.3)
+        ocr_result = None
+        detected_all_texts = []
 
-        # Phase 2: Allow crown drop animations to finish (they animate for ~1.5s in Clash Royale)
-        time.sleep(1.8)
-
-        # Phase 3: Multi-frame crown sampling — always attempt regardless of state
-        print("🔍 [RESULT] Scanning for crowns across 5 frames...")
+        # Phase 1: Use OCR across multiple frames to read end screen text
+        print("🔍 [RESULT] Scanning screen with OCR for match result banner...")
         for attempt in range(5):
             game_area = scaler.game_area_rect
             bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
             screen_pil = ImageGrab.grab(bbox=bbox)
-            # Save the first debug screenshot for diagnostics
-            if attempt == 0:
-                try:
-                    import cv2 as _cv2
-                    _cv2.imwrite("crown_detect_debug.png", _cv2.cvtColor(__import__('numpy').array(screen_pil), _cv2.COLOR_RGB2BGR))
-                except Exception:
-                    pass
-            c_me, c_op = self.get_crown_counts(screen_pil)
-            print(f"   Frame {attempt+1}: me={c_me} op={c_op}")
-            if c_me > max_my_crowns:
-                max_my_crowns = c_me
-            if c_op > max_op_crowns:
-                max_op_crowns = c_op
-            if max_my_crowns == 3:
+            
+            # Read text with EasyOCR
+            texts = vision.reader.readtext(np.array(screen_pil), detail=0, text_threshold=0.55)
+            detected_all_texts.extend(texts)
+            text_str = " ".join(texts).upper()
+            print(f"   [Frame {attempt+1}] OCR: {texts}")
+            
+            if any(w in text_str for w in ["VICTORY", "YOU WIN", "VICTOIRE", "WINNER"]):
+                ocr_result = "WIN"
                 break
+            elif any(w in text_str for w in ["DEFEAT", "YOU LOSE", "LOST", "DEFAITE", "GAME OVER"]):
+                ocr_result = "LOSS"
+                break
+            elif any(w in text_str for w in ["DRAW", "TIE", "TIEBREAKER"]):
+                ocr_result = "DRAW"
+                break
+                
             time.sleep(0.5)
 
+        # Phase 2: Analyze battle steps (damage and tower trajectory)
+        total_damage_dealt = 0.0
+        total_damage_taken = 0.0
+        enemy_king_killed = False
+        friendly_king_killed = False
 
-        # Fallback: Assess cumulative damage from the battle steps if visual detection was inconclusive
-        if max_my_crowns == 0 and max_op_crowns == 0 and battle_steps:
-            total_damage_dealt = 0.0
-            total_damage_taken = 0.0
+        if battle_steps:
             for step in battle_steps:
                 r = step.get('reward', 0.0)
                 if r > 0:
@@ -330,27 +335,68 @@ class GameStateManager:
                 elif r < 0:
                     total_damage_taken += abs(r)
 
-            print(f"📊 [RESULT] Battle Damage Analysis: Dealt={total_damage_dealt:.2f}, Taken={total_damage_taken:.2f}")
-            if total_damage_dealt > total_damage_taken + 0.2:
-                # Strong offensive performance
-                max_my_crowns = 3 if total_damage_dealt >= 1.2 else 1
-                max_op_crowns = 0
-            elif total_damage_taken > total_damage_dealt + 0.2:
-                max_my_crowns = 0
-                max_op_crowns = 3 if total_damage_taken >= 1.2 else 1
+            # Check if king towers were destroyed in the final steps
+            for step in battle_steps[-8:]:
+                ocr = step.get('next_state', {}).get('ocr_data', {})
+                tk_val = ocr.get('tk', '')
+                bk_val = ocr.get('bk', '')
+                if tk_val in ('0', '00', '000') or (total_damage_dealt >= 2.0):
+                    enemy_king_killed = True
+                if bk_val in ('0', '00', '000') or (total_damage_taken >= 2.0):
+                    friendly_king_killed = True
 
-        # Calculate final outcome and reward
-        if max_my_crowns > max_op_crowns:
+        print(f"📊 [RESULT] Battle Damage Analysis: Dealt={total_damage_dealt:.2f}, Taken={total_damage_taken:.2f}")
+
+        # Combine OCR and tower damage metrics
+        if ocr_result == "WIN":
             result = "WIN"
-            reward = 1.5 + (0.3 * (max_my_crowns - 1))  # Bonus reward for 2 or 3 crowns
-        elif max_op_crowns > max_my_crowns:
+            if enemy_king_killed or total_damage_dealt >= 1.5 or "3" in detected_all_texts:
+                max_my_crowns = 3
+            elif total_damage_dealt >= 0.7:
+                max_my_crowns = 2
+            else:
+                max_my_crowns = 1
+            max_op_crowns = 0 if total_damage_taken < 0.6 else (1 if total_damage_taken < 1.2 else 2)
+
+        elif ocr_result == "LOSS":
             result = "LOSS"
-            reward = -1.0
-        else:
+            max_my_crowns = 0 if total_damage_dealt < 0.6 else (1 if total_damage_dealt < 1.2 else 2)
+            if friendly_king_killed or total_damage_taken >= 1.5 or "3" in detected_all_texts:
+                max_op_crowns = 3
+            elif total_damage_taken >= 0.7:
+                max_op_crowns = 2
+            else:
+                max_op_crowns = 1
+
+        elif ocr_result == "DRAW":
             result = "DRAW"
+            max_my_crowns = 0
+            max_op_crowns = 0
+
+        else:
+            print("⚠️ [RESULT] Banner text not detected by OCR, falling back to damage metrics.")
+            if total_damage_dealt > total_damage_taken + 0.3:
+                result = "WIN"
+                max_my_crowns = 3 if total_damage_dealt >= 1.5 else (2 if total_damage_dealt >= 0.7 else 1)
+                max_op_crowns = 0
+            elif total_damage_taken > total_damage_dealt + 0.3:
+                result = "LOSS"
+                max_my_crowns = 0
+                max_op_crowns = 3 if total_damage_taken >= 1.5 else (2 if total_damage_taken >= 0.7 else 1)
+            else:
+                result = "DRAW"
+                max_my_crowns = 0
+                max_op_crowns = 0
+
+        # Calculate final reinforcement learning reward
+        if result == "WIN":
+            reward = 2.0 + (0.5 * (max_my_crowns - 1))
+        elif result == "LOSS":
+            reward = -1.5 - (0.3 * (max_op_crowns - 1))
+        else:
             reward = 0.0
 
-        print(f"🏆 [RESULT] Match Result: {result} (Player Crowns: {max_my_crowns} | Opponent Crowns: {max_op_crowns})")
+        print(f"🏆 [RESULT] Match Result: {result} (Player Crowns: {max_my_crowns} | Opponent Crowns: {max_op_crowns}) | Final Reward: {reward:+.2f}")
         return result, max_my_crowns, max_op_crowns, reward
 
     def get_crown_boxes(self, screen_pil):

@@ -189,21 +189,36 @@ def main():
                         recorder.start()
                     
                     battle_loop_active = True
+                    consecutive_non_battle = 0
                     while battle_loop_active:
                         # Watchdog check for stuck battle
                         watchdog_res = state_manager.check_and_recover_if_stuck(battle_timeout=280)
                         current_status = state_manager.get_state()
 
-                        if current_status != "IN_BATTLE" or watchdog_res == "BATTLE_TIMEOUT":
-                            print("🏁 Battle has ended.")
+                        battle_has_ended = False
+                        if current_status in ("POST_BATTLE", "POST_BATTLE_2"):
+                            print(f"🏁 Battle ended (Detected '{current_status}').")
+                            battle_has_ended = True
+                        elif current_status == "UNKNOWN":
+                            consecutive_non_battle += 1
+                            if consecutive_non_battle >= 5:  # ~2.5 seconds sustained UNKNOWN
+                                print("🏁 Battle ended (Left IN_BATTLE state).")
+                                battle_has_ended = True
+                        elif watchdog_res == "BATTLE_TIMEOUT":
+                            print("🏁 Battle ended (Watchdog timeout reached).")
+                            battle_has_ended = True
+                        else:
+                            # Confirmed still IN_BATTLE
+                            consecutive_non_battle = 0
+
+                        if battle_has_ended:
                             if args.mode == 'record':
                                 recorder.stop()
 
-                            # Accurately evaluate crowns, post-battle screen, and tower damage
+                            # Accurately evaluate match result using OCR and tower damage
                             match_result, my_crowns, op_crowns, final_reward = state_manager.determine_match_outcome(
-                                current_game_log['steps'], scaler
+                                current_game_log['steps'], scaler, vision
                             )
-
 
                             if current_game_log['steps']:
                                 current_game_log['steps'][-1]['reward'] += final_reward
