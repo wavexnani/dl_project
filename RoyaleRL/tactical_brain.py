@@ -441,7 +441,7 @@ class TacticalBrain:
                     cycle_lane = 'left' if ptl_hp <= ptr_hp else 'right'
 
                     x_pct = 0.26 if cycle_lane == 'left' else 0.74
-                    y_pct = 0.82  # Safely behind King Tower
+                    y_pct = 0.76  # Safely behind King Tower on arena grass (well above card UI)
                     deploy_pos = self._to_pixels(x_pct, y_pct)
                     print(f"⚡ [LEAK PREVENTION] Elixir at {elixir:.1f}! Cycling {c.upper()} safely behind King Tower ({x_pct:.2f}, {y_pct:.2f})!")
                     return {'action': 'play_card', 'card_slot': slot, 'position': deploy_pos, 'tactical_rule': 'ELIXIR_LEAK_CYCLE'}
@@ -572,8 +572,8 @@ class TacticalBrain:
             else:
                 cycle_lane = 'left' if pos_pct[0] < 0.50 else 'right'
                 back_x = 0.26 if cycle_lane == 'left' else 0.74
-                safe_pos = self._to_pixels(back_x, 0.82)
-                print(f"⛔ [RULE OVERRIDE] Blocked Bridge Giant! Redirected to safe backline deployment ({back_x:.2f}, 0.82).")
+                safe_pos = self._to_pixels(back_x, 0.76)
+                print(f"⛔ [RULE OVERRIDE] Blocked Bridge Giant! Redirected to safe backline deployment ({back_x:.2f}, 0.76).")
                 return {'action': 'play_card', 'card_slot': slot, 'position': safe_pos, 'tactical_rule': 'SAFE_BACKLINE_TANK'}
 
         # ── Check No Attack During Active Defense (Rule 15) ─────────────

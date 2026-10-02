@@ -245,10 +245,10 @@ class TestTacticalRules(unittest.TestCase):
         action = self.brain.get_mandatory_action(game_state)
         self.assertIsNotNone(action, "Must not sit at 9.8 elixir leaking!")
         self.assertEqual(action.get('tactical_rule'), 'ELIXIR_LEAK_CYCLE')
-        # Must cycle behind King Tower (y >= 0.80)
+        # Must cycle behind King Tower (y >= 0.75)
         pos = action.get('position')
         norm_y = pos[1] / 1007
-        self.assertTrue(norm_y >= 0.80, f"Cycle play y={norm_y} is not safely behind King Tower!")
+        self.assertTrue(norm_y >= 0.75, f"Cycle play y={norm_y} is not safely behind King Tower!")
         print("  [PASS] Rule 6: 10-Elixir Leak Prevention verified.")
 
     # =================================================================

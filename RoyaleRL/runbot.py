@@ -50,7 +50,12 @@ def find_cards_dynamically(scaler):
     game_area = scaler.game_area_rect
     bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
     screenshot_pil = ImageGrab.grab(bbox=bbox)
-    card_boxes = [box for box in config.CARD_OFFSETS_WITH_SIZE]
+    sx = getattr(scaler, 'x_scale', 1.0)
+    sy = getattr(scaler, 'y_scale', 1.0)
+    card_boxes = [
+        (int(x * sx), int(y * sy), int(w * sx), int(h * sy))
+        for (x, y, w, h) in config.CARD_OFFSETS_WITH_SIZE
+    ]
     return screenshot_pil, (0, 0), card_boxes
 
 def wait_for_state_change(state_manager, initial_state, timeout=30):

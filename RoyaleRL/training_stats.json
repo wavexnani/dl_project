@@ -1,19 +1,11 @@
 {
-  "matches_played": 117,
-  "wins": 60,
+  "matches_played": 118,
+  "wins": 61,
   "losses": 32,
   "draws": 25,
-  "overall_win_rate": 51.3,
-  "rolling_win_rate_20": 65.0,
+  "overall_win_rate": 51.7,
+  "rolling_win_rate_20": 70.0,
   "history": [
-    {
-      "match_num": 18,
-      "result": "LOSS",
-      "reward": -1.8,
-      "buffer_size": 597,
-      "epsilon": 0.961,
-      "timestamp": 1790427950.773393
-    },
     {
       "match_num": 19,
       "result": "WIN",
@@ -805,6 +797,14 @@
       "buffer_size": 2295,
       "epsilon": 0.05,
       "timestamp": 1790939431.1672149
+    },
+    {
+      "match_num": 118,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2339,
+      "epsilon": 0.0,
+      "timestamp": 1790943918.7169075
     }
   ]
 }
