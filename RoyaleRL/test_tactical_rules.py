@@ -333,6 +333,81 @@ class TestTacticalRules(unittest.TestCase):
         print("  [PASS] Rule 10: Lane Defense Adaptation verified.")
 
     # =================================================================
+    # RULE 12: Tank Bridge Drop Prohibition (Never Drop Giant at Bridge)
+    # =================================================================
+    def test_rule12_giant_bridge_drop_blocked_and_redirected(self):
+        """Rule 12: Prohibits dropping Giant at river bridge (y < 0.55). Redirects to backline/center."""
+        game_state = {
+            'hand': ['giant', 'musketeer', 'arrows', 'knight'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': []
+        }
+        # Candidate tries to drop Giant at the bridge (y = 0.23, identical to user incident (68, 241))
+        bridge_giant = {'action': 'play_card', 'card_slot': 0, 'position': (68, 241)}
+        validated = self.brain.validate_candidate_action(bridge_giant, game_state)
+        self.assertIsNotNone(validated)
+        self.assertEqual(validated.get('tactical_rule'), 'SAFE_BACKLINE_TANK')
+        new_y = validated.get('position')[1] / 1007
+        self.assertTrue(new_y >= 0.75, f"Giant redirected y={new_y} is not safely in the back!")
+        print("  [PASS] Rule 12: Bridge Giant drop strictly blocked and redirected to backline.")
+
+    # =================================================================
+    # RULE 13: Threat Memory & Persistence (No Flicker Blindness)
+    # =================================================================
+    def test_rule13_threat_memory_persists_across_empty_frames(self):
+        """Rule 13: If detector flickers for 1 frame, threat memory keeps defensive lock active."""
+        # Frame 1: Giant detected crossing river
+        frame1_state = {
+            'hand': ['mini-pekka', 'archers', 'arrows', 'giant'],
+            'elixir': 4.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{'name': 'giant', 'confidence': 0.85, 'box': (120, 450, 180, 510)}]
+        }
+        self.brain.check_emergency_threats(frame1_state)
+        self.assertEqual(self.brain.get_active_threat_lane(), 'left')
+
+        # Frame 2: Detector momentarily returns empty enemies (flicker)
+        frame2_state = {
+            'hand': ['mini-pekka', 'archers', 'arrows', 'giant'],
+            'elixir': 4.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': []  # Empty!
+        }
+        # Brain must STILL defend against the Giant using Threat Memory!
+        action = self.brain.get_mandatory_action(frame2_state)
+        self.assertIsNotNone(action, "Threat Memory must prevent dropping defense when detector flickers!")
+        self.assertEqual(action.get('tactical_rule'), 'CENTER_PULL_DEFENSE')
+        print("  [PASS] Rule 13: Threat Memory maintains defense through temporary detector flickers.")
+
+    # =================================================================
+    # RULE 14: Tower Damage Sensor (Instant Defense on Tower HP Drop)
+    # =================================================================
+    def test_rule14_tower_damage_sensor_triggers_emergency_defense(self):
+        """Rule 14: Friendly Tower HP drop triggers emergency defense even if vision was blind."""
+        # Frame 1: Tower healthy at 2500 HP
+        state_healthy = {
+            'hand': ['mini-pekka', 'archers', 'arrows', 'giant'],
+            'elixir': 5.0,
+            'ocr_data': {'pbl': '2500', 'pbr': '2500'},
+            'enemies': []
+        }
+        self.brain.check_emergency_threats(state_healthy)
+
+        # Frame 2: Tower HP drops to 2350 HP (took 150 damage), no visual detection
+        state_damaged = {
+            'hand': ['mini-pekka', 'archers', 'arrows', 'giant'],
+            'elixir': 5.0,
+            'ocr_data': {'pbl': '2350', 'pbr': '2500'},  # Left tower hit!
+            'enemies': []  # Vision missed it!
+        }
+        action = self.brain.get_mandatory_action(state_damaged)
+        self.assertIsNotNone(action, "Tower damage sensor must trigger emergency defense!")
+        self.assertEqual(action.get('tactical_rule'), 'CENTER_PULL_DEFENSE')
+        self.assertEqual(self.brain.get_active_threat_lane(), 'left')
+        print("  [PASS] Rule 14: Tower Damage Sensor successfully detected tower hit and locked defense.")
+
+    # =================================================================
     # END-TO-END TEST: Agent.decide_action with real weights
     # =================================================================
     def test_agent_end_to_end_guarantees(self):

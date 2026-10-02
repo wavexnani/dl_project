@@ -18,6 +18,9 @@ Strict Rules Enforced (Zero-Tolerance Policy):
   9. Fragile Troop Protection / Tank-in-Front Sequencing
  10. The Pocket Exploitation (Instant 2nd tower snipe on tower down)
  11. Dynamic Lane Adaptation (Strictly match threat lane, no left bias)
+ 12. Tank Bridge Drop Prohibition (NEVER drop Giant naked at the bridge)
+ 13. Threat Memory & Persistence (No momentary blindness drops defense)
+ 14. Tower Damage Sensor (Instant defense trigger on tower HP drop)
 =================================================================
 """
 
@@ -142,6 +145,13 @@ class TacticalBrain:
         self.last_card_time = time.time()
         self.active_push_lane = 'left'  # Dynamic attack lane
 
+        # Threat Persistence Memory: preserves threats across frames so detector flicker doesn't lose threats
+        self.active_threat_memory = []
+
+        # Tower Damage Sensor: tracks our Princess towers to detect attacks instantly
+        self.last_pbl_hp = None
+        self.last_pbr_hp = None
+
     def _get_res(self):
         """Returns current (width, height) resolution safely."""
         if self.scaler is not None and hasattr(self.scaler, 'current_resolution'):
@@ -169,6 +179,15 @@ class TacticalBrain:
         except (ValueError, TypeError):
             return None
 
+    def get_active_threat_lane(self):
+        """Returns the lane currently under threat from active threat memory, or None."""
+        now = time.time()
+        valid = [t for t in self.active_threat_memory if (now - t['timestamp']) < 4.5]
+        if valid:
+            valid.sort(key=lambda t: t['score'], reverse=True)
+            return valid[0]['lane']
+        return None
+
     # ── Rule 1: Tower Spell-Snipe Finisher ─────────────────────────────
     def check_spell_finish(self, game_state):
         """
@@ -187,16 +206,13 @@ class TacticalBrain:
             ('tk',  ocr_data.get('tk'),  (0.51, 0.09), True)   # Enemy King Tower
         ]
 
-        # Prioritize lower HP towers
         valid_towers = []
         for tid, hp_raw, (tx, ty), is_king in towers:
             hp = self._parse_hp(hp_raw)
             if hp is not None and hp > 0:
-                # Only target King Tower if it's already active or a princess tower is down
                 if is_king:
                     ptl_hp = self._parse_hp(ocr_data.get('ptl'))
                     ptr_hp = self._parse_hp(ocr_data.get('ptr'))
-                    # If both princess towers are still alive and healthy, don't spell snipe King unless King lethal
                     if ptl_hp is not None and ptr_hp is not None and hp > SPELL_TOWER_DAMAGE['fireball']:
                         continue
                 valid_towers.append((tid, hp, (tx, ty)))
@@ -204,7 +220,6 @@ class TacticalBrain:
         valid_towers.sort(key=lambda t: t[1])  # Lowest HP first
 
         for tid, hp, (tx_pct, ty_pct) in valid_towers:
-            # 1. Check Arrows lethal (cheaper: 3 elixir, 140 dmg)
             if 'arrows' in hand and hp <= SPELL_TOWER_DAMAGE['arrows']:
                 a_cost = CARD_COSTS.get('arrows', 3)
                 if elixir >= a_cost:
@@ -213,7 +228,6 @@ class TacticalBrain:
                     print(f"🎯 [LETHAL FINISH] Enemy {tid.upper()} at {hp} HP! Casting ARROWS for guaranteed win!")
                     return {'action': 'play_card', 'card_slot': slot, 'position': pix_pos, 'tactical_rule': 'SPELL_FINISH'}
 
-            # 2. Check Fireball lethal (4 elixir, 280 dmg)
             if 'fireball' in hand and hp <= SPELL_TOWER_DAMAGE['fireball']:
                 f_cost = CARD_COSTS.get('fireball', 4)
                 if elixir >= f_cost:
@@ -226,10 +240,6 @@ class TacticalBrain:
 
     # ── Rule 2: King Tower Spell Lockout ──────────────────────────────
     def is_king_tower_clip(self, card_name, pos_pct, game_state):
-        """
-        Rule 2: Returns True if a spell placement would hit the enemy King Tower
-        while both enemy Princess towers are still alive (preventing early King activation).
-        """
         card_norm = normalize_card_name(card_name)
         if card_norm not in ('fireball', 'arrows'):
             return False
@@ -238,22 +248,18 @@ class TacticalBrain:
         ptl_hp = self._parse_hp(ocr_data.get('ptl'))
         ptr_hp = self._parse_hp(ocr_data.get('ptr'))
 
-        # If both Princess towers are alive, King Tower is strictly off-limits
         if ptl_hp is not None and ptr_hp is not None:
             kx1, ky1, kx2, ky2 = KING_TOWER_ZONE
             px, py = pos_pct
-            # Spell splash radius safety buffer: ~0.08
             if (kx1 - 0.08) <= px <= (kx2 + 0.08) and py <= (ky2 + 0.08):
                 return True
         return False
 
     def get_safe_spell_redirection(self, game_state):
-        """Finds the best alive enemy Princess Tower to redirect an accidental King Tower spell."""
         ocr_data = game_state.get('ocr_data', {})
         ptl_hp = self._parse_hp(ocr_data.get('ptl'))
         ptr_hp = self._parse_hp(ocr_data.get('ptr'))
 
-        # If Right is dead or Left has lower HP, target Left
         if ptr_hp is None:
             return self._to_pixels(0.23, 0.14)
         if ptl_hp is None:
@@ -262,52 +268,91 @@ class TacticalBrain:
             return self._to_pixels(0.23, 0.14)
         return self._to_pixels(0.76, 0.14)
 
-    # ── Rule 3, 4, 5: Emergency Threat Defense, Anti-Air & Center-Pull ─
+    # ── Rule 3, 4, 5, 13, 14: Emergency Threat Defense & Memory ───────
     def check_emergency_threats(self, game_state):
         """
-        Rule 3 & 4 & 5:
-        - Detects high-threat enemies crossing the river (Y >= 0.40).
-        - Locks onto the threatened lane (Left or Right).
-        - Strictly forbids ground-only melee against air (Minions).
-        - Enforces Counter Matrix matchup.
-        - Deploys Center-Pull geometry to double defensive DPS.
+        Rule 3, 4, 5, 13, 14:
+        - Detects high-threat enemies crossing the river (Y >= 0.38).
+        - Uses Threat Memory to persist threats across frames (no flicker blindness).
+        - Uses Tower Damage Sensor to instantly detect attacks if our tower HP drops.
+        - Deploys hard counters using Center-Pull geometry.
         """
+        now = time.time()
         enemies = game_state.get('enemies', [])
         raw_hand = game_state.get('hand', [])
         hand = [normalize_card_name(c) for c in raw_hand]
         elixir = game_state.get('elixir', 0.0)
-
-        if not enemies:
-            return None
-
         cur_w, cur_h = self._get_res()
-        active_threats = []
 
+        # 1. Clean expired threats (> 4.5 seconds old)
+        self.active_threat_memory = [t for t in self.active_threat_memory if (now - t['timestamp']) < 4.5]
+
+        # 2. Ingest active vision detections
         for e in enemies:
             name = normalize_card_name(e.get('name', ''))
             box = e.get('box', (0, 0, 0, 0))
             center_x = (box[0] + box[2]) / 2.0 / cur_w
             center_y = (box[1] + box[3]) / 2.0 / cur_h
 
-            # Threat approaching bridge or on our side of the arena
-            if center_y >= 0.38:
+            # Approaching bridge or on our side of the arena
+            if center_y >= 0.36:
                 threat_score = THREAT_LEVELS.get(name, 2)
-                active_threats.append((threat_score, name, center_x, center_y, box))
+                if threat_score >= 3:
+                    threat_lane = 'left' if center_x < 0.50 else 'right'
+                    # Update or add in memory
+                    self.active_threat_memory = [t for t in self.active_threat_memory if t['name'] != name]
+                    self.active_threat_memory.append({
+                        'name': name,
+                        'score': threat_score,
+                        'lane': threat_lane,
+                        'x': center_x,
+                        'y': center_y,
+                        'box': box,
+                        'timestamp': now
+                    })
 
-        if not active_threats:
+        # 3. Tower Damage Sensor (OCR HP drop on friendly towers)
+        ocr_data = game_state.get('ocr_data', {})
+        pbl_hp = self._parse_hp(ocr_data.get('pbl'))
+        pbr_hp = self._parse_hp(ocr_data.get('pbr'))
+
+        if self.last_pbl_hp is not None and pbl_hp is not None and (self.last_pbl_hp - pbl_hp) >= 30:
+            print(f"🚨 [TOWER SENSOR] Left Tower damaged ({self.last_pbl_hp} -> {pbl_hp})! Locking emergency defense on LEFT lane!")
+            self.active_threat_memory.append({
+                'name': 'giant',
+                'score': 10,
+                'lane': 'left',
+                'x': 0.25,
+                'y': 0.60,
+                'box': (int(0.20 * cur_w), int(0.55 * cur_h), int(0.30 * cur_w), int(0.65 * cur_h)),
+                'timestamp': now
+            })
+        elif self.last_pbr_hp is not None and pbr_hp is not None and (self.last_pbr_hp - pbr_hp) >= 30:
+            print(f"🚨 [TOWER SENSOR] Right Tower damaged ({self.last_pbr_hp} -> {pbr_hp})! Locking emergency defense on RIGHT lane!")
+            self.active_threat_memory.append({
+                'name': 'giant',
+                'score': 10,
+                'lane': 'right',
+                'x': 0.75,
+                'y': 0.60,
+                'box': (int(0.70 * cur_w), int(0.55 * cur_h), int(0.80 * cur_w), int(0.65 * cur_h)),
+                'timestamp': now
+            })
+
+        if pbl_hp is not None:
+            self.last_pbl_hp = pbl_hp
+        if pbr_hp is not None:
+            self.last_pbr_hp = pbr_hp
+
+        if not self.active_threat_memory:
             return None
 
-        # Sort by threat severity (Giant and Mini-Pekka highest)
-        active_threats.sort(key=lambda t: t[0], reverse=True)
-        top_threat = active_threats[0]
-        t_score, t_name, t_x, t_y, t_box = top_threat
-
-        # Defend against any unit with threat score >= 3 crossing the river
-        if t_score < 3:
-            return None
-
-        threat_lane = 'left' if t_x < 0.50 else 'right'
-        # Update active push lane to oppose / counter
+        # Sort threats by severity
+        self.active_threat_memory.sort(key=lambda t: t['score'], reverse=True)
+        top_threat = self.active_threat_memory[0]
+        t_name = top_threat['name']
+        threat_lane = top_threat['lane']
+        t_box = top_threat['box']
         self.active_push_lane = threat_lane
 
         # Select counter card from hand
@@ -327,7 +372,6 @@ class TacticalBrain:
         # 2. Fallback: Any affordable playable card that respects Anti-Air law
         if best_counter is None:
             for i, c in enumerate(hand):
-                # Strict Anti-Air Law: Never ground melee vs Minions
                 if t_name == 'minions' and c in GROUND_ONLY_MELEE:
                     continue
                 cost = CARD_COSTS.get(c, 3)
@@ -337,7 +381,7 @@ class TacticalBrain:
                     break
 
         if best_counter is None:
-            # Player cannot afford counter yet; hold elixir, do NOT waste on wrong card
+            # Need more elixir to deploy counter; hold elixir, do NOT spend on wrong card
             return None
 
         # Placement Calculation:
@@ -349,7 +393,6 @@ class TacticalBrain:
                 print(f"🏹 [ANTI-AIR CLEAR] Casting ARROWS directly on Minion swarm at ({strike_x}, {strike_y})!")
                 return {'action': 'play_card', 'card_slot': counter_slot, 'position': (strike_x, strike_y), 'tactical_rule': 'AIR_SWARM_CLEAR'}
             else:
-                # Place anti-air troop safely behind our Princess tower
                 plant_x_pct = 0.23 if threat_lane == 'left' else 0.76
                 plant_y_pct = 0.72
                 deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
@@ -358,7 +401,6 @@ class TacticalBrain:
 
         # B. Single-Target Melee / Tanks (Giant, Mini-Pekka, Knight): Center-Pull Kiting
         if t_name in ('giant', 'mini-pekka', 'knight'):
-            # Pull into center: Tile 4-3 geometry so BOTH Princess towers fire
             plant_x_pct = 0.47 if threat_lane == 'left' else 0.53
             plant_y_pct = 0.63
             deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
@@ -380,18 +422,12 @@ class TacticalBrain:
 
     # ── Rule 6: 10-Elixir Leak Prevention ─────────────────────────────
     def check_elixir_leak_prevention(self, game_state):
-        """
-        Rule 6: If elixir reaches >= 9.5 and no enemies are attacking, forces a safe
-        backline cycle play (Giant, Knight, Archers, Musketeer) behind King tower
-        so elixir is never leaked or wasted sitting at 10.0.
-        """
         elixir = game_state.get('elixir', 0.0)
         hand = [normalize_card_name(c) for c in game_state.get('hand', [])]
 
         if elixir < 9.5:
             return None
 
-        # Cycle preference order: Slow tank / builder first, then ranged support
         cycle_candidates = ['giant', 'knight', 'archers', 'musketeer', 'goblin_hut', 'goblin_cage']
 
         for c in cycle_candidates:
@@ -399,7 +435,6 @@ class TacticalBrain:
                 slot = hand.index(c)
                 cost = CARD_COSTS.get(c, 3)
                 if elixir >= cost:
-                    # Determine lane with weaker enemy tower or default active push lane
                     ocr_data = game_state.get('ocr_data', {})
                     ptl_hp = self._parse_hp(ocr_data.get('ptl')) or 2534
                     ptr_hp = self._parse_hp(ocr_data.get('ptr')) or 2534
@@ -415,10 +450,6 @@ class TacticalBrain:
 
     # ── Rule 10: The Pocket Exploitation ──────────────────────────────
     def check_pocket_deployment(self, game_state):
-        """
-        Rule 10: When one enemy Princess tower is destroyed, deploys high-DPS
-        units directly into 'The Pocket' (mid-river) to quickly assault the 2nd tower.
-        """
         ocr_data = game_state.get('ocr_data', {})
         hand = [normalize_card_name(c) for c in game_state.get('hand', [])]
         elixir = game_state.get('elixir', 0.0)
@@ -428,7 +459,6 @@ class TacticalBrain:
 
         pocket_units = ['musketeer', 'mini-pekka', 'giant']
 
-        # Left tower is down -> Left Pocket assaults Right Tower
         if left_dead and not right_dead:
             for u in pocket_units:
                 if u in hand and elixir >= CARD_COSTS.get(u, 4):
@@ -437,7 +467,6 @@ class TacticalBrain:
                     print(f"🔥 [THE POCKET] Left tower down! Deploying {u.upper()} in Pocket to assault Right Tower!")
                     return {'action': 'play_card', 'card_slot': slot, 'position': pos, 'tactical_rule': 'POCKET_ASSAULT'}
 
-        # Right tower is down -> Right Pocket assaults Left Tower
         if right_dead and not left_dead:
             for u in pocket_units:
                 if u in hand and elixir >= CARD_COSTS.get(u, 4):
@@ -450,27 +479,19 @@ class TacticalBrain:
 
     # ── Mandatory Action Master ───────────────────────────────────────
     def get_mandatory_action(self, game_state):
-        """
-        Evaluates deterministic, non-negotiable rules.
-        If any rule condition is met, returns the required tactical action immediately.
-        """
-        # 1. Lethal Spell Finish (Instant Win)
         finish_action = self.check_spell_finish(game_state)
         if finish_action:
             return finish_action
 
-        # 2. Emergency Threat Response (Never Ignore Bridge / Side Threats)
         threat_action = self.check_emergency_threats(game_state)
         if threat_action:
             return threat_action
 
-        # 3. Pocket Assault (when enemy tower is already down)
         if game_state.get('elixir', 0.0) >= 6.0:
             pocket_action = self.check_pocket_deployment(game_state)
             if pocket_action:
                 return pocket_action
 
-        # 4. Elixir Leak Prevention (Sitting at >= 9.5 elixir)
         leak_action = self.check_elixir_leak_prevention(game_state)
         if leak_action:
             return leak_action
@@ -480,9 +501,13 @@ class TacticalBrain:
     # ── Negative Constraint Validation ────────────────────────────────
     def validate_candidate_action(self, action, game_state):
         """
-        Strictly validates candidate actions (from neural net or exploration)
-        against negative constraints. If an action violates any tactical rule,
-        it is modified, redirected, or blocked (returns None).
+        Strictly validates candidate actions against non-negotiable negative constraints:
+        - Blocks premature King Tower hits
+        - Blocks ground melee vs flying
+        - Blocks bridge Giant drops
+        - Blocks attacking enemy territory while defending
+        - Blocks spell waste
+        - Pulls fragile troops behind river
         """
         if not action or action.get('action') != 'play_card':
             return action
@@ -500,6 +525,25 @@ class TacticalBrain:
         cur_w, cur_h = self._get_res()
         enemies = game_state.get('enemies', [])
 
+        # Ingest current frame enemies into memory if not already present
+        now = time.time()
+        for e in enemies:
+            name = normalize_card_name(e.get('name', ''))
+            box = e.get('box', (0, 0, 0, 0))
+            center_x = (box[0] + box[2]) / 2.0 / cur_w
+            center_y = (box[1] + box[3]) / 2.0 / cur_h
+            if center_y >= 0.36:
+                threat_score = THREAT_LEVELS.get(name, 2)
+                if threat_score >= 3:
+                    t_lane = 'left' if center_x < 0.50 else 'right'
+                    if not any(t['name'] == name for t in self.active_threat_memory):
+                        self.active_threat_memory.append({
+                            'name': name, 'score': threat_score, 'lane': t_lane,
+                            'x': center_x, 'y': center_y, 'box': box, 'timestamp': now
+                        })
+
+        active_threat_lane = self.get_active_threat_lane()
+
         # ── Check King Tower Lockout (Rule 2) ──────────────────────────
         if self.is_king_tower_clip(card_name, pos_pct, game_state):
             print("⛔ [RULE OVERRIDE] Blocked premature spell clipping King Tower! Redirecting to Princess Tower.")
@@ -507,61 +551,79 @@ class TacticalBrain:
             return {'action': 'play_card', 'card_slot': slot, 'position': redirect_pos, 'tactical_rule': 'KING_TOWER_PROTECTION'}
 
         # ── Check Anti-Air Law (Rule 4) ────────────────────────────────
-        # Strictly forbid ground-only melee against flying Minions
         if card_name in GROUND_ONLY_MELEE:
-            active_threats = [
-                e for e in enemies
-                if (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h >= 0.38
-            ]
-            if active_threats and all(normalize_card_name(e.get('name')) == 'minions' for e in active_threats):
+            has_air_threat = any(
+                normalize_card_name(e.get('name')) == 'minions'
+                for e in enemies
+                if (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h >= 0.36
+            ) or any(t['name'] == 'minions' for t in self.active_threat_memory)
+            if has_air_threat:
                 print(f"⛔ [RULE OVERRIDE] Blocked {card_name.upper()} deployment against Minions (Ground melee cannot hit air!).")
                 return None
+
+        # ── Check Tank Bridge Drop Prohibition (Rule 12) ───────────────
+        # Giant must NEVER be dropped aggressively at the bridge (pos_pct[1] < 0.55)
+        if card_name == 'giant' and pos_pct[1] < 0.55:
+            if active_threat_lane:
+                pull_x = 0.47 if active_threat_lane == 'left' else 0.53
+                safe_pos = self._to_pixels(pull_x, 0.63)
+                print(f"⛔ [RULE OVERRIDE] Blocked Bridge Giant! Redirected to Center-Pull Defense ({pull_x:.2f}, 0.63).")
+                return {'action': 'play_card', 'card_slot': slot, 'position': safe_pos, 'tactical_rule': 'CENTER_PULL_DEFENSE'}
+            else:
+                cycle_lane = 'left' if pos_pct[0] < 0.50 else 'right'
+                back_x = 0.26 if cycle_lane == 'left' else 0.74
+                safe_pos = self._to_pixels(back_x, 0.82)
+                print(f"⛔ [RULE OVERRIDE] Blocked Bridge Giant! Redirected to safe backline deployment ({back_x:.2f}, 0.82).")
+                return {'action': 'play_card', 'card_slot': slot, 'position': safe_pos, 'tactical_rule': 'SAFE_BACKLINE_TANK'}
+
+        # ── Check No Attack During Active Defense (Rule 15) ─────────────
+        # If any threat is attacking on our side, NEVER play into enemy territory
+        if active_threat_lane and pos_pct[1] < 0.50 and card_name not in ('fireball', 'arrows'):
+            print(f"⛔ [RULE OVERRIDE] Blocked offensive play on enemy side during active {active_threat_lane.upper()} defense! Redirecting.")
+            def_pos = self._to_pixels(0.47 if active_threat_lane == 'left' else 0.53, 0.63)
+            return {'action': 'play_card', 'card_slot': slot, 'position': def_pos, 'tactical_rule': 'DEFENSIVE_LANE_LOCK'}
 
         # ── Check Spell Waste Rules (Rule 8) ───────────────────────────
         if card_name == 'arrows':
             has_minions = any(normalize_card_name(e.get('name')) == 'minions' for e in enemies)
             has_dense_cluster = len(enemies) >= 2
-            # Check if targeting tower
             is_targeting_tower = (pos_pct[1] <= 0.22)
             if not has_minions and not has_dense_cluster and not is_targeting_tower:
                 print("⛔ [RULE OVERRIDE] Blocked wasting Arrows with no swarm or tower target.")
                 return None
 
         if card_name == 'fireball':
-            # Block Fireball placed on empty backline on our own side
             if pos_pct[1] >= 0.60 and len(enemies) == 0:
                 print("⛔ [RULE OVERRIDE] Blocked wasting Fireball on empty friendly ground.")
                 return None
 
         # ── Check Fragile Troop Protection (Rule 9) ────────────────────
-        # Squishy ranged units (Musketeer, Archers) should not be dropped naked at the bridge
         if card_name in ('musketeer', 'archers') and pos_pct[1] < 0.52:
             safe_pos = (pos[0], int(pos[1] + 0.14 * cur_h))
             print(f"🛡️ [RULE OVERRIDE] Pulled {card_name.upper()} back behind river for safety.")
             return {'action': 'play_card', 'card_slot': slot, 'position': safe_pos, 'tactical_rule': 'TANK_IN_FRONT_SEQUENCING'}
 
         # ── Check Dynamic Lane Defense Adaptation (Rule 11) ────────────
-        # If an enemy threat is approaching on one lane, don't drop card on the opposite lane
-        for e in enemies:
-            ey = (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h
-            if ey >= 0.40:
-                ex = (e.get('box', (0, 0, 0, 0))[0] + e.get('box', (0, 0, 0, 0))[2]) / 2.0 / cur_w
-                threat_lane = 'left' if ex < 0.50 else 'right'
-                play_lane = 'left' if pos_pct[0] < 0.50 else 'right'
-                if card_name not in ('fireball', 'arrows') and play_lane != threat_lane and 0.45 <= pos_pct[1] <= 0.70:
-                    # Adjust to the threatened lane
-                    adjusted_x = int((1.0 - pos_pct[0]) * cur_w)
-                    print(f"🛡️ [RULE OVERRIDE] Adjusted deployment from {play_lane} to threatened {threat_lane} lane.")
-                    return {'action': 'play_card', 'card_slot': slot, 'position': (adjusted_x, pos[1]), 'tactical_rule': 'LANE_ADAPTATION'}
+        threat_lane = active_threat_lane
+        if not threat_lane:
+            for e in enemies:
+                ey = (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h
+                if ey >= 0.36:
+                    ex = (e.get('box', (0, 0, 0, 0))[0] + e.get('box', (0, 0, 0, 0))[2]) / 2.0 / cur_w
+                    threat_lane = 'left' if ex < 0.50 else 'right'
+                    break
+
+        if threat_lane and card_name not in ('fireball', 'arrows'):
+            play_lane = 'left' if pos_pct[0] < 0.50 else 'right'
+            if play_lane != threat_lane and 0.45 <= pos_pct[1] <= 0.70:
+                adjusted_x = int((1.0 - pos_pct[0]) * cur_w)
+                print(f"🛡️ [RULE OVERRIDE] Adjusted deployment from {play_lane} to threatened {threat_lane} lane.")
+                return {'action': 'play_card', 'card_slot': slot, 'position': (adjusted_x, pos[1]), 'tactical_rule': 'LANE_ADAPTATION'}
 
         return action
 
     # ── Master Arbiter ────────────────────────────────────────────────
     def arbitrate_decision(self, game_state, dt_action=None):
-        """
-        Master decision function combining mandatory triggers and candidate validation.
-        Guarantees 100% adherence to all tactical rules.
-        """
         mandatory = self.get_mandatory_action(game_state)
         if mandatory is not None:
             return mandatory

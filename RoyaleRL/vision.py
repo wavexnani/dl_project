@@ -36,40 +36,37 @@ class EnemyDetector:
         """Takes a PIL image, runs detection, and returns a list of detected units."""
         # Convert PIL image to numpy array for processing
         frame_rgb = np.array(screenshot_pil)
-        original_height, original_width, _ = frame_rgb.shape
         
-        # Preprocess: Resize the frame to the resolution the model was trained on
-        resized_frame_rgb = cv2.resize(frame_rgb, self.training_resolution)
-        
-        # Run inference
+        # Run inference directly with AutoShape (preserves aspect ratio without cv2.resize distortion)
         with torch.no_grad():
-            results = self.model(resized_frame_rgb)
+            results = self.model(frame_rgb, size=640)
         
         detections = results.xyxy[0]
 
-        # Calculate scaling factors to map detections back to the original image size
-        x_scale = original_width / self.training_resolution[0]
-        y_scale = original_height / self.training_resolution[1]
-
         detected_units = []
         for *box, conf, cls in detections:
-            # Apply a confidence threshold to filter weak detections
-            if conf >= 0.3: 
-                # Scale box coordinates back to original frame size
-                x1 = int(box[0] * x_scale)
-                y1 = int(box[1] * y_scale)
-                x2 = int(box[2] * x_scale)
-                y2 = int(box[3] * y_scale)
+            # Apply confidence threshold (0.20 to catch moving animations and walking troops)
+            conf_val = float(conf.item())
+            if conf_val >= 0.20: 
+                x1 = int(box[0].item())
+                y1 = int(box[1].item())
+                x2 = int(box[2].item())
+                y2 = int(box[3].item())
                 
-                class_id = int(cls)
+                class_id = int(cls.item())
                 class_name = self.class_names[class_id]
                 
                 # Append the detected unit's info to a list
                 detected_units.append({
                     'name': class_name,
-                    'confidence': float(conf),
-                    'box': (x1, y1, x2, y2) # Bounding box in (left, top, right, bottom) format
+                    'confidence': conf_val,
+                    'box': (x1, y1, x2, y2) # Bounding box in (left, top, right, bottom) pixel format
                 })
+
+        if detected_units:
+            unit_strs = [f"{u['name']}({u['confidence']:.2f}, y={u['box'][1]})" for u in detected_units]
+            print(f"👁️ [VISION] Detected enemies: {', '.join(unit_strs)}")
+
         return detected_units
 
 
