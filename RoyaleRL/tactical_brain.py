@@ -633,9 +633,22 @@ class TacticalBrain:
                 cost = CARD_COSTS.get(c, 3)
                 if elixir >= cost:
                     ocr_data = game_state.get('ocr_data', {})
-                    ptl_hp = self._parse_hp(ocr_data.get('ptl')) or 2534
-                    ptr_hp = self._parse_hp(ocr_data.get('ptr')) or 2534
-                    cycle_lane = 'left' if ptl_hp <= ptr_hp else 'right'
+                    ptl_hp = self._parse_hp(ocr_data.get('ptl'))
+                    ptr_hp = self._parse_hp(ocr_data.get('ptr'))
+                    left_dead = (ptl_hp is None)
+                    right_dead = (ptr_hp is None)
+
+                    # Strategic Lane Route:
+                    # If one tower is already dead, push reinforcements down the BREACHED lane
+                    # directly towards the King Tower, rather than restarting on the second tower!
+                    if left_dead and not right_dead:
+                        cycle_lane = 'left'
+                    elif right_dead and not left_dead:
+                        cycle_lane = 'right'
+                    else:
+                        p_left = ptl_hp if ptl_hp is not None else 2534
+                        p_right = ptr_hp if ptr_hp is not None else 2534
+                        cycle_lane = 'left' if p_left <= p_right else 'right'
 
                     x_pct = 0.26 if cycle_lane == 'left' else 0.74
                     y_pct = 0.76  # Safely behind King Tower on arena grass (well above card UI)
@@ -645,8 +658,13 @@ class TacticalBrain:
 
         return None
 
-    # ── Rule 10: The Pocket Exploitation ──────────────────────────────
+    # ── Rule 10: The Breach & Pocket King Assault ─────────────────────
     def check_pocket_deployment(self, game_state):
+        """
+        Rule 10: Once one enemy Princess Tower is destroyed, the AI exploits the breach
+        to spearhead deep into enemy territory and assault the King Tower for a decisive 3-crown win,
+        while maintaining sentinel defense on the other lane.
+        """
         ocr_data = game_state.get('ocr_data', {})
         hand = [normalize_card_name(c) for c in game_state.get('hand', [])]
         elixir = game_state.get('elixir', 0.0)
@@ -654,22 +672,33 @@ class TacticalBrain:
         left_dead = (self._parse_hp(ocr_data.get('ptl')) is None)
         right_dead = (self._parse_hp(ocr_data.get('ptr')) is None)
 
-        pocket_units = ['musketeer', 'mini-pekka', 'giant']
+        pocket_units = ['giant', 'mini-pekka', 'musketeer', 'knight', 'archers']
 
+        # Case 1: Left Tower is down -> Push through Left Breach into King Tower!
         if left_dead and not right_dead:
             for u in pocket_units:
                 if u in hand and elixir >= CARD_COSTS.get(u, 4):
                     slot = hand.index(u)
                     pos = self._to_pixels(0.42, 0.42)
-                    print(f"🔥 [THE POCKET] Left tower down! Deploying {u.upper()} in Pocket to assault Right Tower!")
+                    print(f"🔥 [BREACH SPEARHEAD] Left tower down! Deploying {u.upper()} through breach to assault KING TOWER!")
                     return {'action': 'play_card', 'card_slot': slot, 'position': pos, 'tactical_rule': 'POCKET_ASSAULT'}
 
+        # Case 2: Right Tower is down -> Push through Right Breach into King Tower!
         if right_dead and not left_dead:
             for u in pocket_units:
                 if u in hand and elixir >= CARD_COSTS.get(u, 4):
                     slot = hand.index(u)
                     pos = self._to_pixels(0.58, 0.42)
-                    print(f"🔥 [THE POCKET] Right tower down! Deploying {u.upper()} in Pocket to assault Left Tower!")
+                    print(f"🔥 [BREACH SPEARHEAD] Right tower down! Deploying {u.upper()} through breach to assault KING TOWER!")
+                    return {'action': 'play_card', 'card_slot': slot, 'position': pos, 'tactical_rule': 'POCKET_ASSAULT'}
+
+        # Case 3: Both Towers down -> Direct Center Breach on King Tower!
+        if left_dead and right_dead:
+            for u in pocket_units:
+                if u in hand and elixir >= CARD_COSTS.get(u, 4):
+                    slot = hand.index(u)
+                    pos = self._to_pixels(0.50, 0.40)
+                    print(f"🔥 [DOUBLE BREACH] Both towers down! Deploying {u.upper()} center for instant 3-Crown!")
                     return {'action': 'play_card', 'card_slot': slot, 'position': pos, 'tactical_rule': 'POCKET_ASSAULT'}
 
         return None

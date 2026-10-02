@@ -190,6 +190,7 @@ def main():
                 elif current_state_name == "IN_BATTLE":
                     print(f"⚔️ Battle in progress ({args.mode.upper()} mode)...")
                     current_game_log = {'steps': []}
+                    battle_start_time = time.time()
                     last_state, action = None, None
                     battle_coords = {"cards": None}
 
@@ -224,8 +225,9 @@ def main():
                                 recorder.stop()
 
                             # Accurately evaluate match result using OCR and tower damage
+                            battle_duration = time.time() - battle_start_time
                             match_result, my_crowns, op_crowns, final_reward = state_manager.determine_match_outcome(
-                                current_game_log['steps'], scaler, vision
+                                current_game_log['steps'], scaler, vision, battle_duration=battle_duration
                             )
 
                             if current_game_log['steps']:

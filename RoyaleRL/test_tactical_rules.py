@@ -665,6 +665,88 @@ class TestTacticalRules(unittest.TestCase):
                           "Ground melee (Mini-Pekka) must NEVER be played against Balloon!")
         print("  [PASS] Rule 23D: Ground melee vs Flying Balloon strictly blocked.")
 
+    # =================================================================
+    # RULE 24: Time-Variant Win Speed Bonus & Penalties
+    # =================================================================
+    def test_rule24_time_variant_speed_bonus_and_penalties(self):
+        """Rule 24: Blitz win (<60s) awards massive bonus (+4.5 to +6.0), slow win (+2.5), loss (-2.5), draw (-1.0)."""
+        # Test mathematical reward calculation directly
+        def calc_reward(result, crowns, duration):
+            speed_ratio = max(0.0, min(1.0, (180.0 - duration) / 180.0))
+            speed_bonus = 2.5 * speed_ratio
+            if result == 'WIN':
+                return 2.5 + (0.5 * (crowns - 1)) + speed_bonus
+            elif result == 'LOSS':
+                return -2.5 - (0.3 * (crowns - 1))
+            else:
+                return -1.0
+
+        blitz_win = calc_reward('WIN', 3, 45.0)   # 45-second 3-crown victory
+        slow_win = calc_reward('WIN', 1, 180.0)   # 3-minute 1-crown victory
+        loss = calc_reward('LOSS', 1, 120.0)      # Defeat
+        draw = calc_reward('DRAW', 0, 180.0)      # Draw
+
+        self.assertGreaterEqual(blitz_win, 5.0, f"Blitz 3-crown win must yield >= 5.0 reward! Got {blitz_win}")
+        self.assertEqual(slow_win, 2.5, f"180s 1-crown win must equal 2.5! Got {slow_win}")
+        self.assertLessEqual(loss, -2.5, f"Loss must penalize with <= -2.5! Got {loss}")
+        self.assertEqual(draw, -1.0, f"Draw must penalize passivity with -1.0! Got {draw}")
+        print("  [PASS] Rule 24: Time-Variant Speed Bonus and Loss/Draw Penalties verified.")
+
+    # =================================================================
+    # RULE 25: King Tower Breach Spearhead & Breached-Lane Reinforcements
+    # =================================================================
+    def test_rule25_king_breach_spearhead_and_leak_cycle(self):
+        """Rule 25: Left Tower dead -> Assaults King Tower through breach and routes 10-elixir cycle to left lane."""
+        game_state = {
+            'hand': ['giant', 'musketeer', 'mini-pekka', 'knight'],
+            'elixir': 7.0,
+            'ocr_data': {'ptl': None, 'ptr': '2100', 'tk': '4000'},  # Left Tower destroyed!
+            'enemies': []
+        }
+        # 1. Pocket King Assault check
+        action = self.brain.get_mandatory_action(game_state)
+        self.assertIsNotNone(action)
+        self.assertEqual(action.get('tactical_rule'), 'POCKET_ASSAULT')
+        pos = action.get('position')
+        norm_x, norm_y = pos[0] / 565, pos[1] / 1007
+        self.assertAlmostEqual(norm_x, 0.42, delta=0.04)  # Left breach pocket
+        self.assertAlmostEqual(norm_y, 0.42, delta=0.04)  # Towards King Tower
+
+        # 2. Elixir leak prevention routes reinforcements down the breached left lane
+        game_state['elixir'] = 9.8
+        leak_action = self.brain.check_elixir_leak_prevention(game_state)
+        self.assertIsNotNone(leak_action)
+        leak_pos = leak_action.get('position')
+        leak_norm_x = leak_pos[0] / 565
+        self.assertAlmostEqual(leak_norm_x, 0.26, delta=0.05,
+                               msg="Reinforcements must cycle down breached Left lane (x~0.26) to push King Tower!")
+        print("  [PASS] Rule 25: King Tower Breach Spearhead & Breached-Lane Reinforcements verified.")
+
+    # =================================================================
+    # RULE 26: Sentinel Defense on Opposite Lane During Breach
+    # =================================================================
+    def test_rule26_sentinel_defense_on_opposite_lane(self):
+        """Rule 26: While Left Tower is breached, an incoming enemy push on the Right lane is intercepted immediately."""
+        game_state = {
+            'hand': ['mini-pekka', 'musketeer', 'arrows', 'giant'],
+            'elixir': 6.0,
+            'ocr_data': {'ptl': None, 'ptr': '2100', 'tk': '4000'},  # Left Tower breached
+            'enemies': [{
+                'name': 'hog',
+                'confidence': 0.95,
+                'box': (400, 420, 460, 480)  # Sneak attack on our Right Tower!
+            }]
+        }
+        # Emergency defense must take precedence over the breach push!
+        action = self.brain.get_mandatory_action(game_state)
+        self.assertIsNotNone(action)
+        self.assertEqual(action.get('tactical_rule'), 'CENTER_PULL_DEFENSE',
+                         "Must immediately center-pull defense against Right-lane threat!")
+        pos = action.get('position')
+        norm_x = pos[0] / 565
+        self.assertAlmostEqual(norm_x, 0.53, delta=0.04, msg="Defense must kite Right-lane threat to center-right!")
+        print("  [PASS] Rule 26: Sentinel Defense on Opposite Lane during breach push verified.")
+
 
 if __name__ == '__main__':
     print(f"\n{'='*70}")

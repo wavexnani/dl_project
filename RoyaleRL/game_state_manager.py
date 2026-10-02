@@ -283,7 +283,7 @@ class GameStateManager:
 
         return my_crowns, opponent_crowns
 
-    def determine_match_outcome(self, battle_steps, scaler, vision):
+    def determine_match_outcome(self, battle_steps, scaler, vision, battle_duration=None):
         """
         Determines whether the match was a WIN, LOSS, or DRAW using:
           1. OCR parsing of the versus screen tokens (splitting by VS to identify
@@ -291,6 +291,7 @@ class GameStateManager:
           2. Crown extraction from the winner's token indicators (e.g. '[3', digits)
              and Clash Royale 3-minute King Tower destruction rule.
           3. Tower damage ground-truth fallback from battle steps.
+          4. Time-Variant Speed Bonus rewarding fast wins and penalizing slow losses/draws.
         Returns: (match_result, my_crowns, op_crowns, final_reward)
         """
         print("⏳ [RESULT] Waiting for battle end banner & animations (2.0s)...")
@@ -396,24 +397,42 @@ class GameStateManager:
         if winner_crowns is None:
             winner_crowns = 1
 
+        # Time-Variant Speed Bonus / Decay Calculation:
+        # Standard Clash Royale match is 180s (3 minutes).
+        # Fast wins (< 60s - 90s) give huge positive reinforcement (+5.0 to +6.0).
+        # Grinding wins (> 150s) give base positive reward (+2.5).
+        # Losses give strong negative punishment (-2.5 to -3.1).
+        # Draws receive a penalty (-1.0) to discourage passivity.
+        if battle_duration is not None and battle_duration > 0:
+            match_time = battle_duration
+        else:
+            match_time = len(battle_steps) * 0.8  # Estimation from steps (~0.8s per step)
+
+        speed_ratio = max(0.0, min(1.0, (180.0 - match_time) / 180.0))
+        speed_bonus = 2.5 * speed_ratio
+
         # Phase 3: Final Outcome & Crown Assignment
         if ocr_result == "WIN":
             result = "WIN"
             max_my_crowns = winner_crowns
             max_op_crowns = 0  # Opponent got 0 crowns if King Tower taken
-            reward = 2.0 + (0.5 * (max_my_crowns - 1))
+            base_reward = 2.5 + (0.5 * (max_my_crowns - 1))
+            reward = base_reward + speed_bonus
+            print(f"⚡ [TIME-REWARD] Blitzkrieg Win in {match_time:.1f}s! Base: +{base_reward:.2f}, Speed Bonus: +{speed_bonus:.2f} -> Total: +{reward:.2f}")
 
         elif ocr_result == "LOSS":
             result = "LOSS"
             max_my_crowns = 0
             max_op_crowns = winner_crowns
-            reward = -1.5 - (0.3 * (max_op_crowns - 1))
+            reward = -2.5 - (0.3 * (max_op_crowns - 1))
+            print(f"💀 [TIME-REWARD] Match Lost in {match_time:.1f}s. Penalty: {reward:.2f}")
 
         elif ocr_result == "DRAW":
             result = "DRAW"
             max_my_crowns = 0
             max_op_crowns = 0
-            reward = 0.0
+            reward = -1.0
+            print(f"⚖️ [TIME-REWARD] Match Draw in {match_time:.1f}s. Passivity Penalty: {reward:.2f}")
 
         else:
             # Fallback to cumulative damage from steps if OCR failed to find anything
@@ -426,17 +445,21 @@ class GameStateManager:
                 result = "WIN"
                 max_my_crowns = 3
                 max_op_crowns = 0
-                reward = 2.0
+                base_reward = 2.5 + (0.5 * 2)  # 3 crowns
+                reward = base_reward + speed_bonus
+                print(f"⚡ [TIME-REWARD] Fallback Damage Win in {match_time:.1f}s! Base: +{base_reward:.2f}, Speed Bonus: +{speed_bonus:.2f} -> Total: +{reward:.2f}")
             elif total_damage_taken > total_damage_dealt + 0.3:
                 result = "LOSS"
                 max_my_crowns = 0
                 max_op_crowns = 3
-                reward = -1.5
+                reward = -2.5 - (0.3 * 2)
+                print(f"💀 [TIME-REWARD] Fallback Damage Loss in {match_time:.1f}s. Penalty: {reward:.2f}")
             else:
                 result = "DRAW"
                 max_my_crowns = 0
                 max_op_crowns = 0
-                reward = 0.0
+                reward = -1.0
+                print(f"⚖️ [TIME-REWARD] Fallback Damage Draw in {match_time:.1f}s. Passivity Penalty: {reward:.2f}")
 
         print(f"🏆 [RESULT] Match Result: {result} (Player Crowns: {max_my_crowns} | Opponent Crowns: {max_op_crowns}) | Final Reward: {reward:+.2f}")
         return result, max_my_crowns, max_op_crowns, reward
