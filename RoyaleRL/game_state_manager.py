@@ -91,7 +91,7 @@ class GameStateManager:
             elif state in ("MAIN_MENU", "POST_BATTLE", "POST_BATTLE_2"):
                 self.battle_start_time = None
 
-    def check_and_recover_if_stuck(self, unknown_timeout=12, battle_timeout=280):
+    def check_and_recover_if_stuck(self, unknown_timeout=12, battle_timeout=280, in_battle=False):
         """
         Watchdog routine:
         1. If state is UNKNOWN for > unknown_timeout seconds, attempt popup dismissal.
@@ -102,7 +102,7 @@ class GameStateManager:
 
         if self.current_state == "UNKNOWN" and elapsed > unknown_timeout:
             print(f"🛡️ [WATCHDOG] Stuck in UNKNOWN state for {elapsed:.1f}s. Running popup dismissal...")
-            self.controller.dismiss_popups()
+            self.controller.dismiss_popups(in_battle=in_battle)
             self.state_start_time = now # reset to give dismissal a chance
             return "RECOVERED"
 
@@ -377,18 +377,20 @@ class GameStateManager:
 
         # Phase 2: Crown Evaluation
         # In Clash Royale: Destroying the middle main base (King Tower) = 3 CROWNS immediately.
-        # Check if winner tokens explicitly contain crown indicator (e.g. '[3', '3')
+        # Check if winner tokens explicitly contain crown indicator (e.g. '[3', '(3', or exact '3')
         winner_crowns = None
         for t in winner_tokens:
             cleaned = ''.join(c for c in t if c.isdigit())
-            if '3' in cleaned:
+            # Require exact single digit or bracketed crown indicator to avoid matching level 13 or trophies
+            if cleaned == '3' or '[3' in t or '(3' in t or '3 CROWN' in t.upper():
                 winner_crowns = 3
                 break
-            elif '2' in cleaned:
+            elif cleaned == '2' or '[2' in t or '(2' in t or '2 CROWN' in t.upper():
                 winner_crowns = 2
                 break
-            elif '1' in cleaned and winner_crowns is None:
-                winner_crowns = 1
+            elif cleaned == '1' or '[1' in t or '(1' in t or '1 CROWN' in t.upper():
+                if winner_crowns is None:
+                    winner_crowns = 1
 
         # Default to 1 crown (standard win) unless 2 or 3 is explicitly detected in winner tokens
         if winner_crowns is None:

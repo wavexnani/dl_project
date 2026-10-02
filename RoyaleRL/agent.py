@@ -9,6 +9,7 @@ import config
 from config import get_health_percentage, CARD_TO_INDEX, NUM_CARD_TYPES, ALL_CARDS, ARENA_BBOX
 import json
 import pickle
+from tactical_brain import TacticalBrain
 
 # Define the 18x30 placement grid
 x_steps = 18
@@ -28,7 +29,7 @@ ACTION_DIM = (NUM_CARD_TYPES + 1) * NUM_GRID_LOCATIONS # +1 for "do nothing"
 class Block(nn.Module):
     def __init__(self, h_dim, n_heads, drop_p):
         super().__init__()
-        self.attn = nn.MultiheadAttention(h_dim, n_heads)
+        self.attn = nn.MultiheadAttention(h_dim, n_heads, batch_first=True)
         self.ff = nn.Sequential(nn.Linear(h_dim, 4 * h_dim), nn.GELU(), nn.Linear(4 * h_dim, h_dim), nn.Dropout(drop_p))
         self.ln1, self.ln2 = nn.LayerNorm(h_dim), nn.LayerNorm(h_dim)
 
@@ -48,7 +49,7 @@ class DecisionTransformer(nn.Module):
         self.embed_timestep = nn.Embedding(context_len, h_dim) 
         self.embed_ln = nn.LayerNorm(h_dim)
         self.transformer_blocks = nn.ModuleList([Block(h_dim, n_heads, drop_p) for _ in range(n_blocks)])
-        self.predict_action = nn.Sequential(nn.Linear(h_dim, self.act_dim), nn.Tanh())
+        self.predict_action = nn.Sequential(nn.Linear(h_dim, self.act_dim))
 
     def forward(self, states, actions, rewards, timesteps):
         batch_size, seq_len, _ = states.shape
@@ -63,7 +64,8 @@ class DecisionTransformer(nn.Module):
         for block in self.transformer_blocks:
             x = block(x)
         x = x.reshape(batch_size, seq_len, 3, self.h_dim).permute(0, 2, 1, 3)
-        return self.predict_action(x[:,1])
+        # Condition action prediction on the state token (index 0) rather than action token (index 1)
+        return self.predict_action(x[:, 0])
 
 class ReplayBuffer:
     def __init__(self, capacity, state_dim, action_dim):
@@ -109,9 +111,10 @@ class Agent:
         self.device = device
         self.model_path = 'rl_agent.pt'
         
-        self.epsilon = 1
-        self.epsilon_min = 0.1
-        self.epsilon_decay = 0.99
+        # Load persisted epsilon so training progress is not lost across restarts
+        self.epsilon = self._load_initial_epsilon()
+        self.epsilon_min = 0.05
+        self.epsilon_decay = 0.985
         
         self.context_len = 10 
         self.n_blocks, self.embed_dim, self.n_heads, self.dropout_p, self.lr = 3, 128, 1, 0.1, 1e-4
@@ -124,9 +127,31 @@ class Agent:
         
         self.buffer_path = 'replay_buffer.pkl' 
         self.replay_buffer = ReplayBuffer(1e5, self.state_dim, self.action_dim)
+        self.tactical_brain = TacticalBrain(scaler=None)
         self.load()
         if os.path.exists(self.buffer_path):
             self.load_buffer()
+
+    def _load_initial_epsilon(self):
+        stats_file = 'training_stats.json'
+        if os.path.exists(stats_file):
+            try:
+                with open(stats_file, 'r') as f:
+                    data = json.load(f)
+                    if 'history' in data and data['history']:
+                        last_eps = data['history'][-1].get('epsilon')
+                        if last_eps is not None and isinstance(last_eps, (int, float)):
+                            val = max(0.05, float(last_eps))
+                            print(f"📊 [AGENT] Loaded persisted exploration rate ε = {val:.3f}")
+                            return val
+            except Exception:
+                pass
+        return 0.35
+
+    def set_epsilon(self, val):
+        """Allows manually setting exploration vs exploitation rate (0.05 = pure AI, 1.0 = random)."""
+        self.epsilon = max(0.0, min(1.0, float(val)))
+        print(f"🎯 [AGENT] Exploration rate manually set to ε = {self.epsilon:.3f}")
     
     def save_buffer(self):
         sz = self.replay_buffer.size
@@ -205,32 +230,48 @@ class Agent:
             ]
         return np.concatenate([elixir, tower_health, hand_vector, enemies_vector])
 
-    def _flatten_action(self, action_dict):
+    def _flatten_action(self, action_dict, scaler=None):
         card_slot = action_dict.get('card_slot', None)
         position = action_dict.get('position', None)
         
         # Now returns a single integer, not a vector
         action_index = NUM_CARD_TYPES * NUM_GRID_LOCATIONS 
         if card_slot is not None and position is not None:
-            closest_grid_index = self._find_closest_grid_index(position)
+            closest_grid_index = self._find_closest_grid_index(position, scaler)
             action_index = card_slot * NUM_GRID_LOCATIONS + closest_grid_index
         return action_index
 
-    def _find_closest_grid_index(self, position):
-        window_width, window_height = config.REFERENCE_RESOLUTION
-        pos_pct = np.array([position[0] / window_width, position[1] / window_height])
+    def _find_closest_grid_index(self, position, scaler=None):
+        if scaler is not None and hasattr(scaler, 'current_resolution'):
+            window_width, window_height = scaler.current_resolution
+        else:
+            window_width, window_height = config.REFERENCE_RESOLUTION
+        pos_pct = np.array([position[0] / max(1, window_width), position[1] / max(1, window_height)])
         
         placement_grid_np = np.array(PLACEMENT_GRID)
         distances = np.linalg.norm(placement_grid_np - pos_pct, axis=1)
         return np.argmin(distances)
 
-    def decide_action(self, game_state, scaler):
+    def decide_action(self, game_state, scaler, current_step=0):
+        # Update scaler for accurate screen coordinate resolution
+        self.tactical_brain.scaler = scaler
+
+        # 1. Deterministic Tactical Overrides (Spell Finisher, Emergency Threats, Leak Prevention, Pocket)
+        mandatory_action = self.tactical_brain.get_mandatory_action(game_state)
+        if mandatory_action is not None:
+            return mandatory_action
+
+        # 2. Candidate Proposal (Exploration or Decision Transformer Policy)
         if np.random.rand() <= self.epsilon:
-            print("BRAIN: Choosing a random action (exploring)...")
-            return self._get_random_action(game_state, scaler)
-        
-        print("BRAIN: Using AI model to decide action (exploiting)...")
-        return self._get_model_action(game_state, scaler)
+            print(f"BRAIN: Choosing candidate action (exploring, ε={self.epsilon:.2f})...")
+            candidate_action = self._get_random_action(game_state, scaler)
+        else:
+            print("BRAIN: Using AI model to decide candidate action (exploiting)...")
+            candidate_action = self._get_model_action(game_state, scaler, current_step)
+
+        # 3. Strict Negative Constraint Validation (King Tower Lockout, Anti-Air, Spell Waste, Fragile Troops)
+        validated_action = self.tactical_brain.validate_candidate_action(candidate_action, game_state)
+        return validated_action
 
     def _get_random_action(self, game_state, scaler):
         hand = game_state.get('hand', [])
@@ -248,7 +289,7 @@ class Agent:
         
         return {'action': 'play_card', 'card_slot': card_slot_index, 'position': (placement_x, placement_y)}
 
-    def _get_model_action(self, game_state, scaler):
+    def _get_model_action(self, game_state, scaler, current_step=0):
         hand = game_state.get('hand', [])
         elixir = game_state.get('elixir', 0)
         playable_cards = [i for i, card in enumerate(hand) if card in self.card_costs and elixir >= self.card_costs[card]]
@@ -261,7 +302,8 @@ class Agent:
         action_tensor = torch.zeros((1, 1, self.action_dim), dtype=torch.float32).to(self.device)
         # Condition DT on a positive target return (aiming for victory)
         reward_tensor = (torch.ones((1, 1, 1), dtype=torch.float32) * 2.0).to(self.device)
-        timestep_tensor = torch.tensor([[self.replay_buffer.size % (self.context_len * 3)]], dtype=torch.long).to(self.device)
+        step_idx = min(current_step, self.context_len - 1)
+        timestep_tensor = torch.tensor([[step_idx]], dtype=torch.long).to(self.device)
 
         self.model.eval()
         with torch.no_grad():
@@ -286,7 +328,7 @@ class Agent:
 
         return {'action': 'play_card', 'card_slot': card_slot_index, 'position': (placement_x, placement_y)}
 
-    def learn_from_game(self, game_log):
+    def learn_from_game(self, game_log, scaler=None):
         if not game_log['steps']:
             print("LEARNING: No steps in game log, skipping training.")
             return
@@ -294,7 +336,7 @@ class Agent:
         print(f"LEARNING: Adding {len(game_log['steps'])} steps to replay buffer...")
         for step in game_log['steps']:
             state_vec = self._flatten_state(step['state'])
-            action_vec = self._flatten_action(step['action'])
+            action_vec = self._flatten_action(step['action'], scaler)
             reward_val = step['reward']
             next_state_vec = self._flatten_state(step['next_state'])
             self.replay_buffer.add(state_vec, action_vec, reward_val, next_state_vec)

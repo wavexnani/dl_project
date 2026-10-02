@@ -75,39 +75,52 @@ class EnemyDetector:
 
 # --- Component 1: The Logical Elixir Tracker ---
 class ElixirTracker:
-    """Tracks elixir logically and syncs with visual reads."""
+    """Tracks elixir logically, deducts card costs immediately, and syncs with visual reads."""
     def __init__(self):
-        self.current_elixir = 0.0
+        self.current_elixir = 5.0
         self.tracking_started = False
         self.last_update_time = None
+        self.match_start_time = None
 
     def start(self):
         if not self.tracking_started:
             self.tracking_started = True
-            self.current_elixir = 7.0
+            self.current_elixir = 5.0
             self.last_update_time = time.time()
-            print("--- Hand detected! Starting elixir tracking at 7. ---")
+            self.match_start_time = time.time()
+            print("💧 [ELIXIR] Hand detected! Initialized elixir tracking at 5.0")
 
     def reset(self):
         if self.tracking_started:
             self.tracking_started = False
             self.current_elixir = 0.0
             self.last_update_time = None
-            print("--- Elixir tracking paused. ---")
+            self.match_start_time = None
+            print("💧 [ELIXIR] Tracking paused.")
+
+    def deduct(self, cost):
+        """Immediately deducts elixir cost when a card is played."""
+        if self.tracking_started and cost > 0:
+            old = self.current_elixir
+            self.current_elixir = max(0.0, self.current_elixir - cost)
+            print(f"💧 [ELIXIR] Deducted {cost} for card. Elixir: {old:.1f} -> {self.current_elixir:.1f}")
 
     def update(self, elapsed_time):
         if not self.tracking_started: return
-        self.current_elixir += elapsed_time * (1.0 / 2.8)
-        if self.current_elixir > 10: self.current_elixir = 10.0
+        match_elapsed = (time.time() - self.match_start_time) if self.match_start_time else 0
+        rate = (1.0 / 1.4) if match_elapsed >= 120 else (1.0 / 2.8)
+        self.current_elixir += elapsed_time * rate
+        if self.current_elixir > 10.0:
+            self.current_elixir = 10.0
         
     def sync_with_vision(self, visual_elixir):
-        """Corrects the logical count only if the whole number is wrong."""
+        """Corrects the logical count when visual reading is confident."""
         if self.tracking_started and visual_elixir is not None and isinstance(visual_elixir, (int, float)):
-            logical_elixir_int = int(self.current_elixir)
-            visual_elixir_int = int(visual_elixir)
-            if logical_elixir_int != visual_elixir_int:
-                print(f"SYNC: Correcting elixir from {self.current_elixir:.1f} to {float(visual_elixir):.1f}")
-                self.current_elixir = float(visual_elixir)
+            if 0 <= visual_elixir <= 10:
+                diff = abs(self.current_elixir - float(visual_elixir))
+                if diff >= 1.0:
+                    print(f"💧 [ELIXIR SYNC] Correcting from {self.current_elixir:.1f} to {float(visual_elixir):.1f}")
+                    self.current_elixir = float(visual_elixir)
 
 # --- Component 2: The AI Card Classifier ---
 class CardClassifier:
@@ -146,20 +159,26 @@ class CardClassifier:
 # --- ElixirVision Class (Integrated) ---
 class ElixirVision:
     """
-    Handles elixir detection using template matching.
+    Handles elixir detection using scaled template matching and color measurement.
     """
-    def __init__(self):
+    def __init__(self, scaler=None):
+        self.scaler = scaler
         self.template_dir = r"sorted_data/elixir"
         self.templates = self._load_elixir_templates()
-        if not self.templates:
-            raise FileNotFoundError("Elixir templates not found. Bot cannot run.")
 
     def _load_elixir_templates(self):
         templates = {}
+        sx = getattr(self.scaler, 'x_scale', 1.0) if self.scaler else 1.0
+        sy = getattr(self.scaler, 'y_scale', 1.0) if self.scaler else 1.0
+
         for i in range(11):
             path = os.path.join(self.template_dir, f"{i}.png")
             if os.path.exists(path):
                 img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+                if img is not None and (abs(sx - 1.0) > 0.02 or abs(sy - 1.0) > 0.02):
+                    nw = max(8, int(img.shape[1] * sx))
+                    nh = max(8, int(img.shape[0] * sy))
+                    img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
                 templates[str(i)] = img
             else:
                 print(f"Warning: Elixir template not found at {path}")
@@ -169,10 +188,14 @@ class ElixirVision:
         screenshot_gray = cv2.cvtColor(np.array(screenshot_region), cv2.COLOR_RGB2GRAY)
         
         best_match = None
-        best_val = 0.8
+        best_val = 0.55  # Adaptive threshold suitable for scaled templates
         
         for value, template in self.templates.items():
             if template is None:
+                continue
+            th, tw = template.shape
+            sh, sw = screenshot_gray.shape
+            if th > sh or tw > sw:
                 continue
 
             res = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
@@ -182,7 +205,7 @@ class ElixirVision:
                 best_val = max_val
                 best_match = value
                 
-        return int(best_match) if best_match else None
+        return int(best_match) if best_match is not None else None
 
 # --- Main Vision Class ---
 class Vision:
@@ -194,7 +217,7 @@ class Vision:
         self.classifier = CardClassifier(config.MODEL_PATH, config.CLASS_NAMES_PATH, self.device)
         self.elixir_tracker = ElixirTracker()
         self.reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
-        self.elixir_vision = ElixirVision()
+        self.elixir_vision = ElixirVision(scaler=scaler)
         
         # --- ADDED: Initialize the new enemy detector ---
         self.enemy_detector = EnemyDetector('enemy_boundary_detector.pt', self.device)
@@ -250,9 +273,19 @@ class Vision:
 
         ocr_data = self._get_ocr_values(screenshot)
         
-        if self.elixir_tracker.tracking_started and current_time - self.last_visual_check_time > 2.0:
-            elixir_x, elixir_y, elixir_w, elixir_h = config.ELIXIR_OFFSET['x'], config.ELIXIR_OFFSET['y'], config.ELIXIR_OFFSET['width'], config.ELIXIR_OFFSET['height']
-            elixir_region = screenshot.crop((elixir_x, elixir_y, elixir_x + elixir_w, elixir_y + elixir_h))
+        if self.elixir_tracker.tracking_started and current_time - self.last_visual_check_time > 1.5:
+            # Scaled elixir crop coordinates
+            sx = getattr(self.scaler, 'x_scale', 1.0)
+            sy = getattr(self.scaler, 'y_scale', 1.0)
+            elixir_x = max(0, int(config.ELIXIR_OFFSET['x'] * sx) - 10)
+            elixir_y = max(0, int(config.ELIXIR_OFFSET['y'] * sy) - 10)
+            elixir_w = int(config.ELIXIR_OFFSET['width'] * sx) + 20
+            elixir_h = int(config.ELIXIR_OFFSET['height'] * sy) + 20
+            img_w, img_h = screenshot.size
+            x2 = min(img_w, elixir_x + elixir_w)
+            y2 = min(img_h, elixir_y + elixir_h)
+
+            elixir_region = screenshot.crop((elixir_x, elixir_y, x2, y2))
             visual_elixir = self.elixir_vision.get_elixir_value(elixir_region)
             if visual_elixir is not None:
                 self.elixir_tracker.sync_with_vision(visual_elixir)

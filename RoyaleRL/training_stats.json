@@ -1,147 +1,11 @@
 {
-  "matches_played": 29,
-  "wins": 17,
-  "losses": 6,
-  "draws": 6,
-  "overall_win_rate": 58.6,
-  "rolling_win_rate_20": 55.0,
+  "matches_played": 117,
+  "wins": 60,
+  "losses": 32,
+  "draws": 25,
+  "overall_win_rate": 51.3,
+  "rolling_win_rate_20": 65.0,
   "history": [
-    {
-      "match_num": 1,
-      "result": "DRAW",
-      "reward": 0.0,
-      "buffer_size": 191,
-      "epsilon": 0.99,
-      "timestamp": 1790387744.41709
-    },
-    {
-      "match_num": 2,
-      "result": "WIN",
-      "reward": 2.1,
-      "buffer_size": 262,
-      "epsilon": 0.99,
-      "timestamp": 1790388350.2355146
-    },
-    {
-      "match_num": 3,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 288,
-      "epsilon": 0.99,
-      "timestamp": 1790399450.7296438
-    },
-    {
-      "match_num": 4,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 312,
-      "epsilon": 0.99,
-      "timestamp": 1790424751.378622
-    },
-    {
-      "match_num": 5,
-      "result": "DRAW",
-      "reward": 0.0,
-      "buffer_size": 313,
-      "epsilon": 0.98,
-      "timestamp": 1790424790.177802
-    },
-    {
-      "match_num": 6,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 338,
-      "epsilon": 0.97,
-      "timestamp": 1790425012.957353
-    },
-    {
-      "match_num": 7,
-      "result": "DRAW",
-      "reward": 0.0,
-      "buffer_size": 340,
-      "epsilon": 0.961,
-      "timestamp": 1790425067.8934386
-    },
-    {
-      "match_num": 8,
-      "result": "WIN",
-      "reward": 2.0,
-      "buffer_size": 345,
-      "epsilon": 0.951,
-      "timestamp": 1790425154.0146308
-    },
-    {
-      "match_num": 9,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 370,
-      "epsilon": 0.941,
-      "timestamp": 1790425367.7734172
-    },
-    {
-      "match_num": 10,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 405,
-      "epsilon": 0.932,
-      "timestamp": 1790425728.7998736
-    },
-    {
-      "match_num": 11,
-      "result": "WIN",
-      "reward": 2.0,
-      "buffer_size": 431,
-      "epsilon": 0.923,
-      "timestamp": 1790425927.8596127
-    },
-    {
-      "match_num": 12,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 448,
-      "epsilon": 0.914,
-      "timestamp": 1790426109.2294986
-    },
-    {
-      "match_num": 13,
-      "result": "DRAW",
-      "reward": 0.0,
-      "buffer_size": 449,
-      "epsilon": 0.904,
-      "timestamp": 1790426170.7415826
-    },
-    {
-      "match_num": 14,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 465,
-      "epsilon": 0.895,
-      "timestamp": 1790426369.8721526
-    },
-    {
-      "match_num": 15,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 516,
-      "epsilon": 0.99,
-      "timestamp": 1790427136.385391
-    },
-    {
-      "match_num": 16,
-      "result": "LOSS",
-      "reward": -2.1,
-      "buffer_size": 533,
-      "epsilon": 0.98,
-      "timestamp": 1790427363.548507
-    },
-    {
-      "match_num": 17,
-      "result": "WIN",
-      "reward": 3.0,
-      "buffer_size": 564,
-      "epsilon": 0.97,
-      "timestamp": 1790427601.1678836
-    },
     {
       "match_num": 18,
       "result": "LOSS",
@@ -237,6 +101,710 @@
       "buffer_size": 817,
       "epsilon": 0.98,
       "timestamp": 1790430384.968361
+    },
+    {
+      "match_num": 30,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 831,
+      "epsilon": 0.99,
+      "timestamp": 1790918458.1748123
+    },
+    {
+      "match_num": 31,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 831,
+      "epsilon": 0.99,
+      "timestamp": 1790918458.4058611
+    },
+    {
+      "match_num": 32,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 897,
+      "epsilon": 0.98,
+      "timestamp": 1790918757.1245418
+    },
+    {
+      "match_num": 33,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 843,
+      "epsilon": 0.99,
+      "timestamp": 1790919031.723993
+    },
+    {
+      "match_num": 34,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 942,
+      "epsilon": 0.97,
+      "timestamp": 1790919034.3949895
+    },
+    {
+      "match_num": 35,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 848,
+      "epsilon": 0.98,
+      "timestamp": 1790919279.8160548
+    },
+    {
+      "match_num": 36,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 943,
+      "epsilon": 0.961,
+      "timestamp": 1790919280.6330135
+    },
+    {
+      "match_num": 37,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 849,
+      "epsilon": 0.97,
+      "timestamp": 1790919307.188984
+    },
+    {
+      "match_num": 38,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1025,
+      "epsilon": 0.951,
+      "timestamp": 1790919603.1036184
+    },
+    {
+      "match_num": 39,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 862,
+      "epsilon": 0.961,
+      "timestamp": 1790919606.06313
+    },
+    {
+      "match_num": 40,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 863,
+      "epsilon": 0.951,
+      "timestamp": 1790919645.9791074
+    },
+    {
+      "match_num": 41,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 876,
+      "epsilon": 0.941,
+      "timestamp": 1790919860.5618875
+    },
+    {
+      "match_num": 42,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1069,
+      "epsilon": 0.941,
+      "timestamp": 1790919862.4557922
+    },
+    {
+      "match_num": 43,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 905,
+      "epsilon": 0.932,
+      "timestamp": 1790920198.6971436
+    },
+    {
+      "match_num": 44,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 929,
+      "epsilon": 0.923,
+      "timestamp": 1790920399.9598875
+    },
+    {
+      "match_num": 45,
+      "result": "LOSS",
+      "reward": -1.8,
+      "buffer_size": 955,
+      "epsilon": 0.914,
+      "timestamp": 1790920620.4622843
+    },
+    {
+      "match_num": 46,
+      "result": "WIN",
+      "reward": 2.5,
+      "buffer_size": 978,
+      "epsilon": 0.904,
+      "timestamp": 1790920853.8920064
+    },
+    {
+      "match_num": 47,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 979,
+      "epsilon": 0.895,
+      "timestamp": 1790920878.6992419
+    },
+    {
+      "match_num": 48,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 980,
+      "epsilon": 0.886,
+      "timestamp": 1790920915.3068888
+    },
+    {
+      "match_num": 49,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 982,
+      "epsilon": 0.878,
+      "timestamp": 1790920981.5969322
+    },
+    {
+      "match_num": 50,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 983,
+      "epsilon": 0.869,
+      "timestamp": 1790921019.665025
+    },
+    {
+      "match_num": 51,
+      "result": "WIN",
+      "reward": 2.5,
+      "buffer_size": 1001,
+      "epsilon": 0.86,
+      "timestamp": 1790921379.9041595
+    },
+    {
+      "match_num": 52,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1008,
+      "epsilon": 0.851,
+      "timestamp": 1790921462.5723057
+    },
+    {
+      "match_num": 53,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1034,
+      "epsilon": 0.843,
+      "timestamp": 1790921672.8182898
+    },
+    {
+      "match_num": 54,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1035,
+      "epsilon": 0.835,
+      "timestamp": 1790921697.555396
+    },
+    {
+      "match_num": 55,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1037,
+      "epsilon": 0.826,
+      "timestamp": 1790921797.2661207
+    },
+    {
+      "match_num": 56,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1046,
+      "epsilon": 0.818,
+      "timestamp": 1790921902.2051601
+    },
+    {
+      "match_num": 57,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1072,
+      "epsilon": 0.81,
+      "timestamp": 1790922107.62354
+    },
+    {
+      "match_num": 58,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1123,
+      "epsilon": 0.802,
+      "timestamp": 1790922404.2471957
+    },
+    {
+      "match_num": 59,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1146,
+      "epsilon": 0.794,
+      "timestamp": 1790922651.6201532
+    },
+    {
+      "match_num": 60,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1160,
+      "epsilon": 0.786,
+      "timestamp": 1790922818.9341488
+    },
+    {
+      "match_num": 61,
+      "result": "LOSS",
+      "reward": -1.8,
+      "buffer_size": 1180,
+      "epsilon": 0.778,
+      "timestamp": 1790923011.29436
+    },
+    {
+      "match_num": 62,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1196,
+      "epsilon": 0.77,
+      "timestamp": 1790923208.4115782
+    },
+    {
+      "match_num": 63,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1199,
+      "epsilon": 0.762,
+      "timestamp": 1790923324.6331565
+    },
+    {
+      "match_num": 64,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1201,
+      "epsilon": 0.755,
+      "timestamp": 1790923438.4644074
+    },
+    {
+      "match_num": 65,
+      "result": "LOSS",
+      "reward": -1.8,
+      "buffer_size": 1225,
+      "epsilon": 0.747,
+      "timestamp": 1790923634.2762692
+    },
+    {
+      "match_num": 66,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1253,
+      "epsilon": 0.74,
+      "timestamp": 1790923873.4934833
+    },
+    {
+      "match_num": 67,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1276,
+      "epsilon": 0.732,
+      "timestamp": 1790924071.8017478
+    },
+    {
+      "match_num": 68,
+      "result": "WIN",
+      "reward": 2.5,
+      "buffer_size": 1301,
+      "epsilon": 0.725,
+      "timestamp": 1790924346.1264684
+    },
+    {
+      "match_num": 69,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1328,
+      "epsilon": 0.718,
+      "timestamp": 1790924564.700613
+    },
+    {
+      "match_num": 70,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1361,
+      "epsilon": 0.711,
+      "timestamp": 1790924810.0757492
+    },
+    {
+      "match_num": 71,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1363,
+      "epsilon": 0.703,
+      "timestamp": 1790925047.6367552
+    },
+    {
+      "match_num": 72,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1429,
+      "epsilon": 0.99,
+      "timestamp": 1790927521.3351872
+    },
+    {
+      "match_num": 73,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1462,
+      "epsilon": 0.98,
+      "timestamp": 1790927655.202121
+    },
+    {
+      "match_num": 74,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1487,
+      "epsilon": 0.97,
+      "timestamp": 1790927757.2170646
+    },
+    {
+      "match_num": 75,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1548,
+      "epsilon": 0.961,
+      "timestamp": 1790927980.7751882
+    },
+    {
+      "match_num": 76,
+      "result": "WIN",
+      "reward": 3.0,
+      "buffer_size": 1600,
+      "epsilon": 0.951,
+      "timestamp": 1790928181.207788
+    },
+    {
+      "match_num": 77,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1613,
+      "epsilon": 0.05,
+      "timestamp": 1790929490.0382075
+    },
+    {
+      "match_num": 78,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1642,
+      "epsilon": 0.05,
+      "timestamp": 1790929706.6690407
+    },
+    {
+      "match_num": 79,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1671,
+      "epsilon": 0.05,
+      "timestamp": 1790929912.1401155
+    },
+    {
+      "match_num": 80,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1680,
+      "epsilon": 0.05,
+      "timestamp": 1790930004.4824317
+    },
+    {
+      "match_num": 81,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1713,
+      "epsilon": 0.05,
+      "timestamp": 1790930226.640117
+    },
+    {
+      "match_num": 82,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1756,
+      "epsilon": 0.05,
+      "timestamp": 1790930587.814379
+    },
+    {
+      "match_num": 83,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1764,
+      "epsilon": 0.05,
+      "timestamp": 1790930703.413538
+    },
+    {
+      "match_num": 84,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1788,
+      "epsilon": 0.05,
+      "timestamp": 1790930914.1673496
+    },
+    {
+      "match_num": 85,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1790,
+      "epsilon": 0.05,
+      "timestamp": 1790931024.799374
+    },
+    {
+      "match_num": 86,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 1818,
+      "epsilon": 0.05,
+      "timestamp": 1790931245.6284287
+    },
+    {
+      "match_num": 87,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1843,
+      "epsilon": 0.05,
+      "timestamp": 1790931442.8065395
+    },
+    {
+      "match_num": 88,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 1868,
+      "epsilon": 0.05,
+      "timestamp": 1790931656.0093553
+    },
+    {
+      "match_num": 89,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1923,
+      "epsilon": 0.05,
+      "timestamp": 1790933879.4488478
+    },
+    {
+      "match_num": 90,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1933,
+      "epsilon": 0.05,
+      "timestamp": 1790934111.6289144
+    },
+    {
+      "match_num": 91,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1934,
+      "epsilon": 0.05,
+      "timestamp": 1790934171.653124
+    },
+    {
+      "match_num": 92,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1941,
+      "epsilon": 0.05,
+      "timestamp": 1790934285.4130845
+    },
+    {
+      "match_num": 93,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1942,
+      "epsilon": 0.05,
+      "timestamp": 1790934337.4120436
+    },
+    {
+      "match_num": 94,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1947,
+      "epsilon": 0.05,
+      "timestamp": 1790934408.6647096
+    },
+    {
+      "match_num": 95,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1965,
+      "epsilon": 0.05,
+      "timestamp": 1790934577.7219336
+    },
+    {
+      "match_num": 96,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1975,
+      "epsilon": 0.05,
+      "timestamp": 1790934717.2142406
+    },
+    {
+      "match_num": 97,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 1995,
+      "epsilon": 0.05,
+      "timestamp": 1790934941.3594837
+    },
+    {
+      "match_num": 98,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 1996,
+      "epsilon": 0.05,
+      "timestamp": 1790935091.819345
+    },
+    {
+      "match_num": 99,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 2005,
+      "epsilon": 0.05,
+      "timestamp": 1790935207.0730903
+    },
+    {
+      "match_num": 100,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2009,
+      "epsilon": 0.05,
+      "timestamp": 1790935271.1929855
+    },
+    {
+      "match_num": 101,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2048,
+      "epsilon": 0.05,
+      "timestamp": 1790935666.2672863
+    },
+    {
+      "match_num": 102,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2057,
+      "epsilon": 0.05,
+      "timestamp": 1790935804.0441995
+    },
+    {
+      "match_num": 103,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2068,
+      "epsilon": 0.05,
+      "timestamp": 1790935952.2412846
+    },
+    {
+      "match_num": 104,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2080,
+      "epsilon": 0.05,
+      "timestamp": 1790936260.910429
+    },
+    {
+      "match_num": 105,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2086,
+      "epsilon": 0.05,
+      "timestamp": 1790936360.1205702
+    },
+    {
+      "match_num": 106,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2104,
+      "epsilon": 0.05,
+      "timestamp": 1790936583.2195354
+    },
+    {
+      "match_num": 107,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2116,
+      "epsilon": 0.05,
+      "timestamp": 1790936727.736161
+    },
+    {
+      "match_num": 108,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2140,
+      "epsilon": 0.05,
+      "timestamp": 1790936972.9625244
+    },
+    {
+      "match_num": 109,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2167,
+      "epsilon": 0.05,
+      "timestamp": 1790937221.0640554
+    },
+    {
+      "match_num": 110,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2175,
+      "epsilon": 0.05,
+      "timestamp": 1790937525.858535
+    },
+    {
+      "match_num": 111,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 2176,
+      "epsilon": 0.05,
+      "timestamp": 1790937676.645344
+    },
+    {
+      "match_num": 112,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2199,
+      "epsilon": 0.05,
+      "timestamp": 1790937884.0711038
+    },
+    {
+      "match_num": 113,
+      "result": "DRAW",
+      "reward": 0.0,
+      "buffer_size": 2200,
+      "epsilon": 0.05,
+      "timestamp": 1790937936.2873733
+    },
+    {
+      "match_num": 114,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 2215,
+      "epsilon": 0.05,
+      "timestamp": 1790938148.0279973
+    },
+    {
+      "match_num": 115,
+      "result": "WIN",
+      "reward": 2.0,
+      "buffer_size": 2250,
+      "epsilon": 0.05,
+      "timestamp": 1790938348.7029436
+    },
+    {
+      "match_num": 116,
+      "result": "LOSS",
+      "reward": -1.5,
+      "buffer_size": 2260,
+      "epsilon": 0.05,
+      "timestamp": 1790938465.5888822
+    },
+    {
+      "match_num": 117,
+      "result": "LOSS",
+      "reward": -2.1,
+      "buffer_size": 2295,
+      "epsilon": 0.05,
+      "timestamp": 1790939431.1672149
     }
   ]
 }

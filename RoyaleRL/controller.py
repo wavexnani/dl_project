@@ -96,15 +96,16 @@ class Controller:
         pyautogui.press('esc')
         print("🎮 [CONTROLLER] Sent Escape (Android Back) via pyautogui.")
 
-    def dismiss_popups(self):
+    def dismiss_popups(self, in_battle=False):
         """Attempts to clear unknown dialogs, popups, or reward screens."""
         print("🛡️ [WATCHDOG] Attempting to dismiss popup/stuck screen...")
         self.send_escape()
         time.sleep(0.5)
-        # Click center of game area to clear tap-to-continue prompts
-        gw, gh = self.scaler.current_resolution
-        self.click(int(gw * 0.5), int(gh * 0.75))
-        time.sleep(0.5)
+        if not in_battle:
+            # Click center of game area to clear tap-to-continue prompts only outside battle
+            gw, gh = self.scaler.current_resolution
+            self.click(int(gw * 0.5), int(gh * 0.75))
+            time.sleep(0.5)
 
 
     def play_card(self, card_slot_coords, placement_coords):

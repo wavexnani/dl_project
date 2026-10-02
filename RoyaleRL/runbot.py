@@ -126,6 +126,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=5, help="Number of training epochs after each game (or total for train mode)")
     parser.add_argument('--batch_size', type=int, default=64, help="Batch size for training")
     parser.add_argument('--games', type=int, default=0, help="Number of games to run (0 for infinite 24/7)")
+    parser.add_argument('--epsilon', type=float, default=None, help="Exploration rate override (e.g. 0.05 for pure AI, 1.0 for random)")
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -135,6 +136,8 @@ def main():
     print(f"=======================================================\n")
 
     ai_agent = Agent(state_dim=STATE_DIM, action_dim=ACTION_DIM, card_costs=CARD_COSTS, device=device)
+    if args.epsilon is not None:
+        ai_agent.set_epsilon(args.epsilon)
 
     # If pure offline training mode, run training and exit
     if args.mode == 'train':
@@ -156,7 +159,7 @@ def main():
         try:
             while True:
                 # Check for watchdog timeout or stuck popups
-                recovery_flag = state_manager.check_and_recover_if_stuck(unknown_timeout=10, battle_timeout=280)
+                recovery_flag = state_manager.check_and_recover_if_stuck(unknown_timeout=10, battle_timeout=280, in_battle=False)
                 current_state_name = state_manager.get_state()
                 print(f"\nCurrent game state is: {current_state_name}")
 
@@ -191,8 +194,8 @@ def main():
                     battle_loop_active = True
                     consecutive_non_battle = 0
                     while battle_loop_active:
-                        # Watchdog check for stuck battle
-                        watchdog_res = state_manager.check_and_recover_if_stuck(battle_timeout=280)
+                        # Watchdog check for stuck battle (safe in-battle mode: no random clicks in arena)
+                        watchdog_res = state_manager.check_and_recover_if_stuck(battle_timeout=280, in_battle=True)
                         current_status = state_manager.get_state()
 
                         battle_has_ended = False
@@ -222,7 +225,7 @@ def main():
 
                             if current_game_log['steps']:
                                 current_game_log['steps'][-1]['reward'] += final_reward
-                                ai_agent.learn_from_game(current_game_log)
+                                ai_agent.learn_from_game(current_game_log, scaler=scaler)
                                 ai_agent.train(num_epochs=args.epochs, batch_size=args.batch_size)
                                 ai_agent.update_match_stats(match_result, final_reward)
 
@@ -245,8 +248,8 @@ def main():
                             if last_state and action:
                                 reward = calculate_reward(last_state, current_game_state)
                                 current_game_log['steps'].append({
-                                    'state': last_state, 'action': action,
-                                    'reward': reward, 'next_state': current_game_state
+                                     'state': last_state, 'action': action,
+                                     'reward': reward, 'next_state': current_game_state
                                 })
                                 action = None
 
@@ -256,27 +259,37 @@ def main():
                                 if human_action:
                                     action = human_action
                                     last_state = current_game_state
+                                    # Deduct elixir for the human player's card
+                                    h_slot = human_action.get('card_slot')
+                                    h_hand = current_game_state.get('hand', [])
+                                    if h_slot is not None and 0 <= h_slot < len(h_hand):
+                                        c_name = h_hand[h_slot]
+                                        c_cost = config.CARD_COSTS.get(c_name, 3)
+                                        vision.elixir_tracker.deduct(c_cost)
                                 time.sleep(0.15)
                                 continue
 
-                            # Autonomous AI Mode: Decision Transformer decides action
-                            action = ai_agent.decide_action(current_game_state, scaler)
+                            # Autonomous AI Mode: Decision Transformer & Tactical Brain decide action
+                            step_idx = len(current_game_log['steps'])
+                            action = ai_agent.decide_action(current_game_state, scaler, current_step=step_idx)
                             if action and action.get('action') == 'play_card':
                                 slot, pos = action['card_slot'], action['position']
+                                rule_name = action.get('tactical_rule', 'AI_DECISION')
                                 
                                 if 0 <= slot < len(battle_coords["cards"]):
                                     box = battle_coords["cards"][slot]
                                     click_x, click_y = box[0] + box[2] // 2, box[1] + box[3] // 2
+                                    print(f"⚡ [PLAY CARD] Executing {rule_name} (Slot {slot} at {pos})")
                                     controller.play_card((click_x, click_y), pos)
+                                    # Deduct elixir for played card
+                                    hand = current_game_state.get('hand', [])
+                                    if 0 <= slot < len(hand):
+                                        c_name = hand[slot]
+                                        c_cost = config.CARD_COSTS.get(c_name, 3)
+                                        vision.elixir_tracker.deduct(c_cost)
                                 else:
-                                    print(f"ERROR: AI predicted invalid card slot: {slot}. Using random fallback.")
-                                    action = ai_agent._get_random_action(current_game_state, scaler)
-                                    if action and action.get('action') == 'play_card':
-                                        rand_slot = action['card_slot']
-                                        if 0 <= rand_slot < len(battle_coords["cards"]):
-                                            box = battle_coords["cards"][rand_slot]
-                                            click_x, click_y = box[0] + box[2] // 2, box[1] + box[3] // 2
-                                            controller.play_card((click_x, click_y), action['position'])
+                                    print(f"⚠️ [WARNING] AI predicted invalid card slot: {slot}.")
+                                    action = None
                             
                             last_state = current_game_state
                         
