@@ -29,72 +29,143 @@ import numpy as np
 import config
 from config import CARD_COSTS
 
-# --- The 10 Recognized Card Classes ---
-# archers, arrows, fireball, giant, goblin_cage, goblin_hut, knight, mini-pekka, minions, musketeer
-
-# --- Threat Hierarchy ---
+# --- Complete Universal Threat Hierarchy (Covering all 133 Clash Royale units) ---
 THREAT_LEVELS = {
-    'giant': 10,        # Critical Win Condition (Hits towers only)
-    'mini-pekka': 9,    # Critical High-DPS Melee (Can 3-shot towers)
-    'minions': 8,       # High Flying Swarm DPS (Air-only vulnerability)
-    'musketeer': 7,     # High Ranged DPS
-    'knight': 5,        # Medium Mini-Tank
-    'goblin_hut': 4,    # Medium Spawner Building
-    'goblin_cage': 3,   # Medium Defensive Building
-    'archers': 3,       # Low Ranged Duo
+    # ── Tier 1: Critical Win Conditions & Tower Demolishers (Threat 10) ──
+    'giant': 10, 'hog': 10, 'balloon': 10, 'ramrider': 10, 'wallbreakers': 10,
+    'skeletonbarrel': 10, 'goblinbarrel': 10, 'egiant': 10, 'golem': 10,
+    'royalgiant': 10, 'battleram': 10, 'lavahound': 10, 'pig': 10, 'royalhogs': 10,
+    'goblingiant': 10, 'evoroyalgiant': 10,
+
+    # ── Tier 2: Heavy Bruisers & Threat Tanks (Threat 9) ──
+    'mini-pekka': 9, 'pekka': 9, 'megaknight': 9, 'prince': 9, 'darkprince': 9,
+    'ebarbs': 9, 'giantskeleton': 9, 'sparky': 9, 'goldenknight': 9, 'monk': 9,
+    'skellyking': 9, 'evoknight': 9,
+
+    # ── Tier 3: Champions, Tower Infiltrators & High Ranged DPS (Threat 8) ──
+    'queen': 8, 'miner': 8, 'mightyminer': 8, 'graveyard': 8, 'goblindrill': 8,
+    'musketeer': 8, 'wizard': 8, 'witch': 8, 'marcher': 8, 'executioner': 8,
+    'dartgoblin': 8, 'flyingmachine': 8, 'littleprince': 8, 'hunter': 8,
+    'motherwitch': 8, 'princess': 8, 'minions': 8, 'minionhorde': 8,
+    'infernodragon': 8, 'babydragon': 8, 'edragon': 8,
+
+    # ── Tier 4: Swarms & Fast Attackers (Threat 7) ──
+    'goblin': 7, 'speargoblin': 7, 'skeleton': 7, 'guards': 7, 'bat': 7,
+    'firecracker': 7, 'rascalboy': 7, 'rascalgirl': 7, 'barbarian': 7,
+    'royalrecruits': 7, 'zappies': 7, 'evofirecracker': 7, 'evoskeleton': 7,
+    'evobomber': 7, 'evobat': 7,
+
+    # ── Tier 5: Mini-Tanks & Defensive Ground (Threat 5) ──
+    'valk': 5, 'knight': 5, 'icegolem': 5, 'fisherman': 5, 'bowler': 5,
+    'bandit': 5, 'royalghost': 5, 'battlehealer': 5, 'lumberjack': 5,
+    'cannoncart': 5,
+
+    # ── Tier 6: Spawners & Buildings (Threat 4) ──
+    'goblin_hut': 4, 'barbarianhut': 4, 'furnace': 4, 'tombstone': 4,
+    'goblin_cage': 3, 'archers': 3, 'evoarchers': 3, 'bomber': 3,
+    'xbow': 8, 'mortar': 6
 }
 
-# --- Tactical Counter Matrix ---
-# Maps an incoming enemy unit to a priority list of best counters in your deck
+# --- Tactical Counter Matrix (Universal hard-counters for all 133 units) ---
 COUNTER_MATRIX = {
-    'giant': [
-        'mini-pekka',    # #1: Shreds Giant HP in seconds
-        'goblin_cage',   # #2: Center pull building, absorbs hits, Brawler counter-pushes
-        'musketeer',     # #3: Safe long-range DPS
-        'minions',       # #4: Air DPS (Giant cannot hit back)
-        'knight'         # #5: Cheap meat-shield
-    ],
-    'mini-pekka': [
-        'minions',       # #1: Air unit! Mini-Pekka CANNOT hit air (takes 0 damage!)
-        'goblin_cage',   # #2: Absorbs strikes, Brawler finishes
-        'knight',        # #3: Distraction mini-tank (pulls into middle while towers shoot)
-        'archers'        # #4: Ranged chip behind tower
-    ],
-    'minions': [
-        'arrows',        # #1: Instant 1-hit kill on swarm (positive/neutral elixir trade)
-        'musketeer',     # #2: Anti-air sniper from safety
-        'archers',       # #3: Anti-air duo from safety
-        'fireball'       # #4: Heavy spell fallback
-    ],
-    'musketeer': [
-        'knight',        # #1: Drop directly on top of her at the bridge
-        'mini-pekka',    # #2: 1-shots her
-        'fireball',      # #3: Direct spell removal
-        'minions'        # #4: Swarm surround
-    ],
-    'knight': [
-        'mini-pekka',    # #1: Overpowers Knight in 2-3 hits
-        'minions',       # #2: Air DPS (Knight cannot hit air)
-        'musketeer',     # #3: Long-range chip
-        'goblin_cage'    # #4: Defensive buffer
-    ],
-    'goblin_hut': [
-        'fireball',      # #1: Hits hut + tower for massive value
-        'musketeer',     # #2: Defends lane against spear goblins
-        'giant'          # #3: Counter-push tank
-    ],
-    'goblin_cage': [
-        'musketeer',     # #1: Snipes cage from distance before Brawler emerges
-        'minions'        # #2: Air assault
-    ],
-    'archers': [
-        'arrows',        # #1: Clears duo
-        'knight',        # #2: Melee drop
-        'fireball'       # #3: Spell clear
-    ]
+    # ── Win Conditions ──
+    'giant': ['mini-pekka', 'goblin_cage', 'musketeer', 'minions', 'knight'],
+    'hog': ['mini-pekka', 'goblin_cage', 'minions', 'knight', 'musketeer'],
+    'balloon': ['musketeer', 'archers', 'minions', 'arrows', 'fireball'],
+    'ramrider': ['mini-pekka', 'goblin_cage', 'minions', 'knight'],
+    'wallbreakers': ['arrows', 'minions', 'archers', 'knight'],
+    'skeletonbarrel': ['arrows', 'musketeer', 'minions', 'archers'],
+    'goblinbarrel': ['arrows', 'archers', 'knight', 'minions', 'valk'],
+    'egiant': ['mini-pekka', 'goblin_cage', 'musketeer'],
+    'golem': ['mini-pekka', 'minions', 'goblin_cage', 'musketeer'],
+    'royalgiant': ['mini-pekka', 'minions', 'goblin_cage', 'musketeer'],
+    'battleram': ['mini-pekka', 'goblin_cage', 'knight', 'minions'],
+    'lavahound': ['musketeer', 'minions', 'archers'],
+    'pig': ['arrows', 'fireball', 'minions', 'valk', 'knight', 'mini-pekka'],
+    'royalhogs': ['arrows', 'fireball', 'valk', 'mini-pekka', 'knight', 'minions'],
+    'goblingiant': ['mini-pekka', 'goblin_cage', 'minions', 'musketeer'],
+    'evoroyalgiant': ['mini-pekka', 'minions', 'goblin_cage', 'musketeer'],
+
+    # ── Heavy Bruisers ──
+    'mini-pekka': ['minions', 'goblin_cage', 'knight', 'archers'],
+    'pekka': ['minions', 'goblin_cage', 'knight', 'archers'],
+    'megaknight': ['minions', 'mini-pekka', 'knight', 'goblin_cage'],
+    'prince': ['goblin_cage', 'minions', 'knight', 'mini-pekka'],
+    'darkprince': ['minions', 'mini-pekka', 'knight', 'goblin_cage'],
+    'ebarbs': ['minions', 'goblin_cage', 'knight', 'valk', 'fireball'],
+    'giantskeleton': ['minions', 'knight', 'goblin_cage', 'mini-pekka'],
+    'sparky': ['minions', 'mini-pekka', 'knight', 'fireball'],
+    'goldenknight': ['knight', 'mini-pekka', 'minions', 'goblin_cage'],
+    'monk': ['minions', 'musketeer', 'mini-pekka', 'goblin_cage'],
+    'skellyking': ['mini-pekka', 'knight', 'arrows', 'minions'],
+    'evoknight': ['mini-pekka', 'minions', 'goblin_cage', 'musketeer'],
+
+    # ── Champions & Ranged ──
+    'queen': ['knight', 'mini-pekka', 'fireball', 'minions', 'musketeer'],
+    'miner': ['knight', 'mini-pekka', 'archers', 'minions'],
+    'mightyminer': ['minions', 'mini-pekka', 'knight', 'goblin_cage'],
+    'graveyard': ['archers', 'minions', 'knight', 'arrows'],
+    'goblindrill': ['knight', 'mini-pekka', 'valk', 'arrows'],
+    'musketeer': ['knight', 'mini-pekka', 'fireball', 'minions'],
+    'wizard': ['knight', 'mini-pekka', 'fireball'],
+    'witch': ['valk', 'knight', 'fireball', 'mini-pekka', 'arrows'],
+    'marcher': ['knight', 'mini-pekka', 'fireball', 'arrows'],
+    'executioner': ['mini-pekka', 'knight', 'fireball'],
+    'dartgoblin': ['arrows', 'knight', 'archers'],
+    'flyingmachine': ['musketeer', 'fireball', 'archers', 'minions'],
+    'littleprince': ['knight', 'mini-pekka', 'fireball', 'arrows'],
+    'princess': ['arrows', 'knight', 'minions'],
+    'hunter': ['knight', 'mini-pekka', 'fireball'],
+    'motherwitch': ['fireball', 'knight', 'mini-pekka', 'arrows'],
+
+    # ── Swarms ──
+    'minions': ['arrows', 'musketeer', 'archers', 'fireball'],
+    'minionhorde': ['arrows', 'fireball', 'musketeer', 'archers'],
+    'goblin': ['arrows', 'archers', 'valk', 'knight'],
+    'speargoblin': ['arrows', 'archers', 'knight', 'musketeer'],
+    'skeleton': ['arrows', 'archers', 'knight'],
+    'guards': ['arrows', 'valk', 'knight', 'archers'],
+    'bat': ['arrows', 'musketeer', 'archers', 'minions'],
+    'firecracker': ['arrows', 'knight', 'fireball', 'mini-pekka'],
+    'evofirecracker': ['fireball', 'arrows', 'knight', 'mini-pekka'],
+    'barbarian': ['fireball', 'valk', 'minions', 'arrows'],
+    'royalrecruits': ['valk', 'fireball', 'minions', 'arrows'],
+    'zappies': ['fireball', 'valk', 'knight'],
+
+    # ── Mini-Tanks ──
+    'valk': ['minions', 'mini-pekka', 'musketeer', 'goblin_cage'],
+    'knight': ['mini-pekka', 'minions', 'musketeer', 'goblin_cage'],
+    'icegolem': ['mini-pekka', 'musketeer', 'minions'],
+    'bowler': ['minions', 'mini-pekka', 'musketeer'],
+    'babydragon': ['musketeer', 'archers', 'minions'],
+    'infernodragon': ['musketeer', 'archers', 'minions'],
+    'edragon': ['musketeer', 'mini-pekka', 'archers'],
+    'bandit': ['knight', 'mini-pekka', 'goblin_cage'],
+    'royalghost': ['knight', 'mini-pekka', 'minions'],
+    'lumberjack': ['mini-pekka', 'minions', 'knight', 'goblin_cage'],
+    'fisherman': ['minions', 'mini-pekka', 'knight'],
+    'cannoncart': ['mini-pekka', 'minions', 'knight'],
+
+    # ── Spawners & Buildings ──
+    'goblin_hut': ['fireball', 'musketeer', 'giant'],
+    'goblin_cage': ['musketeer', 'minions', 'giant'],
+    'barbarianhut': ['fireball', 'giant', 'musketeer'],
+    'furnace': ['fireball', 'musketeer', 'giant'],
+    'tombstone': ['arrows', 'musketeer', 'giant'],
+    'xbow': ['giant', 'knight', 'mini-pekka', 'minions'],
+    'mortar': ['knight', 'giant', 'musketeer', 'minions'],
+    'archers': ['arrows', 'knight', 'fireball'],
+    'evoarchers': ['arrows', 'knight', 'fireball']
 }
 
-# Cards that CANNOT hit air targets (STRICTLY FORBIDDEN against Minions)
+# Flying units (STRICT ANTI-AIR LAW: Ground-only melee can NEVER target these!)
+FLYING_UNITS = {
+    'minions', 'minionhorde', 'balloon', 'babydragon', 'edragon',
+    'infernodragon', 'skeletondragon', 'bat', 'lavahound',
+    'flyingmachine', 'pheonix', 'skeletonbarrel', 'evobat'
+}
+
+# Cards that CANNOT hit air targets (STRICTLY FORBIDDEN against Minions and flying units)
 GROUND_ONLY_MELEE = {'knight', 'mini-pekka'}
 
 # Damage thresholds for spell execution (estimated tower damage)
@@ -108,23 +179,49 @@ KING_TOWER_ZONE = (0.36, 0.00, 0.64, 0.22)
 
 
 def normalize_card_name(name):
-    """Normalizes card names across detector labels, OCR, and deck lists."""
+    """Normalizes card names across all 133 detector labels, OCR, and deck lists."""
     if not name:
         return ''
-    n = str(name).lower().strip().replace('_', '-')
-    if 'pekka' in n:
+    n = str(name).lower().strip().replace('_', '').replace('-', '').replace(' ', '')
+    if 'minipekka' in n:
         return 'mini-pekka'
-    if 'cage' in n:
+    if 'megaknight' in n:
+        return 'megaknight'
+    if 'pekka' in n:
+        return 'pekka'
+    if 'queen' in n:
+        return 'queen'
+    if 'mightyminer' in n:
+        return 'mightyminer'
+    if 'miner' in n:
+        return 'miner'
+    if 'valk' in n:
+        return 'valk'
+    if 'speargoblin' in n:
+        return 'speargoblin'
+    if 'goblinbarrel' in n:
+        return 'goblinbarrel'
+    if 'goblincage' in n:
         return 'goblin_cage'
-    if 'hut' in n:
+    if 'goblinhut' in n:
         return 'goblin_hut'
+    if 'goblindrill' in n:
+        return 'goblindrill'
+    if 'goblingiant' in n:
+        return 'goblingiant'
+    if 'goblin' in n:
+        return 'goblin'
+    if 'hog' in n or 'pig' in n:
+        return 'hog'
+    if 'balloon' in n:
+        return 'balloon'
     if 'minion' in n:
         return 'minions'
-    if 'archer' in n:
+    if 'archer' in n and 'magic' not in n and 'queen' not in n:
         return 'archers'
-    if 'giant' in n:
+    if 'giant' in n and 'skeleton' not in n:
         return 'giant'
-    if 'knight' in n:
+    if 'knight' in n and 'golden' not in n and 'mega' not in n:
         return 'knight'
     if 'musk' in n:
         return 'musketeer'
@@ -132,7 +229,31 @@ def normalize_card_name(name):
         return 'fireball'
     if 'arrow' in n:
         return 'arrows'
-    return n.replace('-', '_')
+    if 'skeletonbarrel' in n:
+        return 'skeletonbarrel'
+    if 'skeleton' in n:
+        return 'skeleton'
+    if 'firecracker' in n:
+        return 'firecracker'
+    if 'wizard' in n:
+        return 'wizard'
+    if 'witch' in n:
+        return 'witch'
+    if 'prince' in n and 'dark' not in n:
+        return 'prince'
+    if 'darkprince' in n:
+        return 'darkprince'
+    if 'ebarbs' in n:
+        return 'ebarbs'
+    if 'sparky' in n:
+        return 'sparky'
+    if 'wallbreaker' in n:
+        return 'wallbreakers'
+    if 'ramrider' in n:
+        return 'ramrider'
+    if 'battleram' in n:
+        return 'battleram'
+    return n
 
 
 class TacticalBrain:
@@ -442,7 +563,7 @@ class TacticalBrain:
         # 2. Fallback: Any affordable playable card that respects Anti-Air law
         if best_counter is None:
             for i, c in enumerate(hand):
-                if t_name == 'minions' and c in GROUND_ONLY_MELEE:
+                if t_name in FLYING_UNITS and c in GROUND_ONLY_MELEE:
                     continue
                 cost = CARD_COSTS.get(c, 3)
                 if elixir >= cost:
@@ -455,35 +576,42 @@ class TacticalBrain:
             return None
 
         # Placement Calculation:
-        # A. Air Swarm (Minions): Direct Arrows strike with predictive lead aiming
-        if t_name == 'minions':
+        # A. Swarms (Minions, Bats, Goblins, etc.): Direct Arrows strike with predictive lead aiming
+        if t_name in ('minions', 'minionhorde', 'bat', 'speargoblin', 'goblin', 'skeleton', 'firecracker'):
             if best_counter == 'arrows':
-                strike_pos = self.calculate_predictive_aim(t_box, enemy_name='minions', spell_name='arrows')
+                strike_pos = self.calculate_predictive_aim(t_box, enemy_name=t_name, spell_name='arrows')
                 print(f"🏹 [ANTI-AIR CLEAR] Casting ARROWS with predictive lead aiming at {strike_pos}!")
                 return {'action': 'play_card', 'card_slot': counter_slot, 'position': strike_pos, 'tactical_rule': 'AIR_SWARM_CLEAR'}
-            else:
+            elif t_name in FLYING_UNITS:
                 plant_x_pct = 0.23 if threat_lane == 'left' else 0.76
                 plant_y_pct = 0.72
                 deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
-                print(f"🛡️ [ANTI-AIR DEFENSE] Deploying {best_counter.upper()} behind tower to intercept Minions!")
+                print(f"🛡️ [ANTI-AIR DEFENSE] Deploying {best_counter.upper()} behind tower to intercept {t_name.upper()}!")
                 return {'action': 'play_card', 'card_slot': counter_slot, 'position': deploy_pos, 'tactical_rule': 'RANGED_ANTI_AIR'}
 
-        # B. Single-Target Melee / Tanks (Giant, Mini-Pekka, Knight): Center-Pull Kiting
-        if t_name in ('giant', 'mini-pekka', 'knight'):
+        # B. Tower Infiltrators (Miner, Goblin Barrel directly on tower): Intercept directly on tower
+        if t_name in ('miner', 'mightyminer', 'goblinbarrel') or (top_threat['y'] >= 0.58 and t_name in ('valk', 'goblin', 'guards')):
+            t_px_x = int((t_box[0] + t_box[2]) / 2)
+            t_px_y = int((t_box[1] + t_box[3]) / 2)
+            print(f"🛡️ [TOWER INTERCEPT] Deploying {best_counter.upper()} directly onto {t_name.upper()} at ({t_px_x}, {t_px_y})!")
+            return {'action': 'play_card', 'card_slot': counter_slot, 'position': (t_px_x, t_px_y), 'tactical_rule': 'TOWER_INTERCEPT'}
+
+        # C. Single-Target Melee / Tanks / Win Conditions: Center-Pull Kiting
+        if t_name in ('giant', 'mini-pekka', 'knight', 'hog', 'balloon', 'pekka', 'megaknight', 'prince', 'darkprince', 'ebarbs', 'ramrider', 'golem', 'egiant', 'royalgiant'):
             plant_x_pct = 0.47 if threat_lane == 'left' else 0.53
             plant_y_pct = 0.63
             deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
             print(f"🛡️ [CENTER PULL] Playing {best_counter.upper()} at Center Kiting Zone ({plant_x_pct:.2f}, {plant_y_pct:.2f}) vs {t_name.upper()}!")
             return {'action': 'play_card', 'card_slot': counter_slot, 'position': deploy_pos, 'tactical_rule': 'CENTER_PULL_DEFENSE'}
 
-        # C. Ranged Attacker (Musketeer): Drop melee directly on top of her
-        if t_name == 'musketeer' and best_counter in ('knight', 'mini-pekka'):
+        # D. Ranged Attackers & Champions (Musketeer, Queen, Wizard, Witch, etc.): Drop melee directly on top
+        if t_name in ('musketeer', 'queen', 'wizard', 'witch', 'marcher', 'dartgoblin', 'executioner', 'littleprince', 'princess') and best_counter in ('knight', 'mini-pekka'):
             drop_x = int((t_box[0] + t_box[2]) / 2)
             drop_y = int((t_box[1] + t_box[3]) / 2)
-            print(f"⚔️ [MELEE DROP] Dropping {best_counter.upper()} directly on Musketeer at ({drop_x}, {drop_y})!")
+            print(f"⚔️ [MELEE DROP] Dropping {best_counter.upper()} directly on {t_name.upper()} at ({drop_x}, {drop_y})!")
             return {'action': 'play_card', 'card_slot': counter_slot, 'position': (drop_x, drop_y), 'tactical_rule': 'MELEE_ON_RANGED'}
 
-        # D. Standard Lane Defense
+        # E. Standard Lane Defense
         plant_x_pct = 0.26 if threat_lane == 'left' else 0.74
         plant_y_pct = 0.65
         deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
@@ -622,12 +750,12 @@ class TacticalBrain:
         # ── Check Anti-Air Law (Rule 4) ────────────────────────────────
         if card_name in GROUND_ONLY_MELEE:
             has_air_threat = any(
-                normalize_card_name(e.get('name')) == 'minions'
+                normalize_card_name(e.get('name')) in FLYING_UNITS
                 for e in enemies
                 if (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h >= 0.36
-            ) or any(t['name'] == 'minions' for t in self.active_threat_memory)
+            ) or any(t['name'] in FLYING_UNITS for t in self.active_threat_memory)
             if has_air_threat:
-                print(f"⛔ [RULE OVERRIDE] Blocked {card_name.upper()} deployment against Minions (Ground melee cannot hit air!).")
+                print(f"⛔ [RULE OVERRIDE] Blocked {card_name.upper()} deployment against Air Threat (Ground melee cannot hit air!).")
                 return None
 
         # ── Check Tank Bridge Drop Prohibition (Rule 12) ───────────────

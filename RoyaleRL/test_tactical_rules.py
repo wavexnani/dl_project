@@ -580,6 +580,91 @@ class TestTacticalRules(unittest.TestCase):
         self.assertNotEqual(hand[slot], 'arrows', "Agent must not waste Arrows on empty grass!")
         print("  [PASS] Rule 22: Multi-Candidate fallback successfully prevented passivity / paralysis.")
 
+    # =================================================================
+    # RULE 23: Universal 133-Card Threat Defense (Queen, Miner, Hog, Balloon)
+    # =================================================================
+    def test_rule23_archer_queen_threat_countered_by_melee(self):
+        """Rule 23: Archer Queen crossing river is high threat (score 8) and countered by Knight on top."""
+        game_state = {
+            'hand': ['knight', 'arrows', 'fireball', 'giant'],
+            'elixir': 4.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{
+                'name': 'queen',
+                'confidence': 0.92,
+                'box': (120, 440, 180, 500)
+            }]
+        }
+        action = self.brain.get_mandatory_action(game_state)
+        self.assertIsNotNone(action, "Archer Queen must trigger mandatory defense!")
+        self.assertEqual(action.get('card_slot'), 0)  # Knight is top counter
+        self.assertEqual(action.get('tactical_rule'), 'MELEE_ON_RANGED')
+        print("  [PASS] Rule 23A: Archer Queen Champion countered by Knight directly on top.")
+
+    def test_rule23_miner_infiltrator_intercepted_at_tower(self):
+        """Rule 23: Miner digging into friendly Left Tower triggers TOWER_INTERCEPT right on the tower."""
+        game_state = {
+            'hand': ['mini-pekka', 'arrows', 'musketeer', 'giant'],
+            'elixir': 4.5,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{
+                'name': 'miner',
+                'confidence': 0.89,
+                'box': (100, 720, 160, 780)  # On friendly left tower
+            }]
+        }
+        action = self.brain.get_mandatory_action(game_state)
+        self.assertIsNotNone(action, "Miner infiltrating tower must trigger mandatory defense!")
+        self.assertEqual(action.get('card_slot'), 0)  # Mini-Pekka
+        self.assertEqual(action.get('tactical_rule'), 'TOWER_INTERCEPT')
+        # Check that deployment position is directly on the friendly tower (0.24, 0.77)
+        pos = action.get('position')
+        norm_x, norm_y = pos[0] / 565, pos[1] / 1007
+        self.assertAlmostEqual(norm_x, 0.24, delta=0.05)
+        self.assertAlmostEqual(norm_y, 0.77, delta=0.05)
+        print("  [PASS] Rule 23B: Miner Tower Infiltrator intercepted directly at friendly Princess Tower.")
+
+    def test_rule23_hog_rider_center_pull_kited(self):
+        """Rule 23: Hog Rider rushing Left lane is pulled into the center firing zone."""
+        game_state = {
+            'hand': ['mini-pekka', 'arrows', 'musketeer', 'giant'],
+            'elixir': 4.5,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{
+                'name': 'hog',
+                'confidence': 0.95,
+                'box': (120, 420, 180, 480)
+            }]
+        }
+        action = self.brain.get_mandatory_action(game_state)
+        self.assertIsNotNone(action, "Hog Rider must trigger mandatory defense!")
+        self.assertEqual(action.get('card_slot'), 0)  # Mini-Pekka is #1 hard counter
+        self.assertEqual(action.get('tactical_rule'), 'CENTER_PULL_DEFENSE')
+        pos = action.get('position')
+        norm_x, norm_y = pos[0] / 565, pos[1] / 1007
+        self.assertAlmostEqual(norm_x, 0.47, delta=0.04)
+        print("  [PASS] Rule 23C: Hog Rider win condition kited to center-pull defense zone.")
+
+    def test_rule23_balloon_blocks_ground_melee(self):
+        """Rule 23: Balloon (flying) strictly blocks Knight or Mini-Pekka from being played."""
+        game_state = {
+            'hand': ['knight', 'mini-pekka', 'giant', 'goblin_cage'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{
+                'name': 'balloon',
+                'confidence': 0.91,
+                'box': (130, 420, 190, 480)
+            }]
+        }
+        candidate_knight = {'action': 'play_card', 'card_slot': 0, 'position': (200, 500)}
+        candidate_pekka = {'action': 'play_card', 'card_slot': 1, 'position': (200, 500)}
+        self.assertIsNone(self.brain.validate_candidate_action(candidate_knight, game_state),
+                          "Ground melee (Knight) must NEVER be played against Balloon!")
+        self.assertIsNone(self.brain.validate_candidate_action(candidate_pekka, game_state),
+                          "Ground melee (Mini-Pekka) must NEVER be played against Balloon!")
+        print("  [PASS] Rule 23D: Ground melee vs Flying Balloon strictly blocked.")
+
 
 if __name__ == '__main__':
     print(f"\n{'='*70}")

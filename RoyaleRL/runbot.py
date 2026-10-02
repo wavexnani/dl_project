@@ -298,7 +298,7 @@ def main():
                             
                             last_state = current_game_state
                         
-                        time.sleep(1.8)
+                        time.sleep(0.35)
                 time.sleep(1)
 
         except KeyboardInterrupt:
