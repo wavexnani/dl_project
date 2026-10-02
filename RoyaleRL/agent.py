@@ -271,7 +271,14 @@ class Agent:
 
         # 3. Strict Negative Constraint Validation (King Tower Lockout, Anti-Air, Spell Waste, Fragile Troops)
         validated_action = self.tactical_brain.validate_candidate_action(candidate_action, game_state)
-        return validated_action
+        if validated_action is not None:
+            return validated_action
+
+        # 4. Elixir Relief Valve (Prevents passivity trap if candidate was rejected and elixir >= 9.0)
+        if game_state.get('elixir', 0.0) >= 9.0:
+            return self.tactical_brain.check_elixir_leak_prevention(game_state, min_elixir=9.0)
+
+        return None
 
     def _get_random_action(self, game_state, scaler):
         hand = game_state.get('hand', [])

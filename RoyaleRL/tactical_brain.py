@@ -188,6 +188,60 @@ class TacticalBrain:
             return valid[0]['lane']
         return None
 
+    def calculate_predictive_aim(self, box, enemy_name='minions', spell_name='arrows'):
+        """
+        Calculates the lead intercept point for spells (Arrows, Fireball) targeting moving enemies.
+        Accounts for spell deploy delay (1.0s) + distance-based projectile flight time.
+        Applies distance-decay clamping near the Princess tower to prevent over-shooting.
+        """
+        cur_w, cur_h = self._get_res()
+        cx_pct = ((box[0] + box[2]) / 2.0) / cur_w
+        cy_pct = ((box[1] + box[3]) / 2.0) / cur_h
+
+        # Destination Princess Tower
+        target_tower_x = 0.23 if cx_pct < 0.50 else 0.76
+        target_tower_y = 0.62
+
+        # Clash Royale troop speeds (normalized screen Y per second)
+        speeds = {
+            'minions': 0.048,      # Fast (84 tiles/min)
+            'mini-pekka': 0.048,   # Fast
+            'knight': 0.034,       # Medium
+            'musketeer': 0.034,    # Medium
+            'archers': 0.034,      # Medium
+            'giant': 0.022         # Slow
+        }
+        v = speeds.get(enemy_name.lower(), 0.035)
+
+        # Distance from our King Tower (0.50, 0.76) to current target position
+        dist = np.hypot(cx_pct - 0.50, cy_pct - 0.76)
+        flight_time = 1.0 + (dist / 0.65)  # 1.0s deploy + projectile flight
+
+        # Stop-Zone Clamping: If enemy is near the Princess tower (Y >= 0.54),
+        # they are locking onto or attacking the tower, so decay forward lead to 0!
+        if cy_pct >= 0.58:
+            lead_factor = 0.0
+        elif cy_pct >= 0.44:
+            lead_factor = max(0.0, (0.58 - cy_pct) / (0.58 - 0.44))
+        else:
+            lead_factor = 1.0
+
+        # Projected impact coordinates
+        lead_y_pct = cy_pct + (v * flight_time * lead_factor)
+        lead_y_pct = min(0.60, max(cy_pct, lead_y_pct))
+
+        # Interpolate X along the vector towards the target Princess tower
+        if target_tower_y > cy_pct:
+            progress = (lead_y_pct - cy_pct) / (target_tower_y - cy_pct)
+            lead_x_pct = cx_pct + progress * (target_tower_x - cx_pct)
+        else:
+            lead_x_pct = cx_pct
+
+        pixel_x = int(lead_x_pct * cur_w)
+        pixel_y = int(lead_y_pct * cur_h)
+        print(f"🎯 [PREDICTIVE LEAD] Leading {enemy_name.upper()} ({cx_pct:.2f}, {cy_pct:.2f}) -> Intercept ({lead_x_pct:.2f}, {lead_y_pct:.2f})")
+        return (pixel_x, pixel_y)
+
     # ── Rule 1: Tower Spell-Snipe Finisher ─────────────────────────────
     def check_spell_finish(self, game_state):
         """
@@ -201,8 +255,8 @@ class TacticalBrain:
 
         # Candidate target towers: (tower_id, hp_value, (pct_x, pct_y), is_king)
         towers = [
-            ('ptl', ocr_data.get('ptl'), (0.23, 0.14), False),  # Enemy Left Princess Tower
-            ('ptr', ocr_data.get('ptr'), (0.76, 0.14), False),  # Enemy Right Princess Tower
+            ('ptl', ocr_data.get('ptl'), (0.20, 0.14), False),  # Enemy Left Princess Tower (calibrated safe outward)
+            ('ptr', ocr_data.get('ptr'), (0.79, 0.14), False),  # Enemy Right Princess Tower (calibrated safe outward)
             ('tk',  ocr_data.get('tk'),  (0.51, 0.09), True)   # Enemy King Tower
         ]
 
@@ -385,13 +439,12 @@ class TacticalBrain:
             return None
 
         # Placement Calculation:
-        # A. Air Swarm (Minions): Direct Arrows strike on swarm center or ranged behind tower
+        # A. Air Swarm (Minions): Direct Arrows strike with predictive lead aiming
         if t_name == 'minions':
             if best_counter == 'arrows':
-                strike_x = int((t_box[0] + t_box[2]) / 2)
-                strike_y = int((t_box[1] + t_box[3]) / 2)
-                print(f"🏹 [ANTI-AIR CLEAR] Casting ARROWS directly on Minion swarm at ({strike_x}, {strike_y})!")
-                return {'action': 'play_card', 'card_slot': counter_slot, 'position': (strike_x, strike_y), 'tactical_rule': 'AIR_SWARM_CLEAR'}
+                strike_pos = self.calculate_predictive_aim(t_box, enemy_name='minions', spell_name='arrows')
+                print(f"🏹 [ANTI-AIR CLEAR] Casting ARROWS with predictive lead aiming at {strike_pos}!")
+                return {'action': 'play_card', 'card_slot': counter_slot, 'position': strike_pos, 'tactical_rule': 'AIR_SWARM_CLEAR'}
             else:
                 plant_x_pct = 0.23 if threat_lane == 'left' else 0.76
                 plant_y_pct = 0.72
@@ -421,14 +474,14 @@ class TacticalBrain:
         return {'action': 'play_card', 'card_slot': counter_slot, 'position': deploy_pos, 'tactical_rule': 'LANE_DEFENSE'}
 
     # ── Rule 6: 10-Elixir Leak Prevention ─────────────────────────────
-    def check_elixir_leak_prevention(self, game_state):
+    def check_elixir_leak_prevention(self, game_state, min_elixir=9.5):
         elixir = game_state.get('elixir', 0.0)
         hand = [normalize_card_name(c) for c in game_state.get('hand', [])]
 
-        if elixir < 9.5:
+        if elixir < min_elixir:
             return None
 
-        cycle_candidates = ['giant', 'knight', 'archers', 'musketeer', 'goblin_hut', 'goblin_cage']
+        cycle_candidates = ['giant', 'knight', 'archers', 'musketeer', 'goblin_hut', 'goblin_cage', 'mini-pekka', 'minions']
 
         for c in cycle_candidates:
             if c in hand:
@@ -629,6 +682,14 @@ class TacticalBrain:
             return mandatory
 
         if dt_action is not None:
-            return self.validate_candidate_action(dt_action, game_state)
+            validated = self.validate_candidate_action(dt_action, game_state)
+            if validated is not None:
+                return validated
+
+        # Elixir Relief Valve (Prevents Analysis Paralysis passivity trap):
+        if game_state.get('elixir', 0.0) >= 9.0:
+            leak_action = self.check_elixir_leak_prevention(game_state, min_elixir=9.0)
+            if leak_action:
+                return leak_action
 
         return None

@@ -170,10 +170,10 @@ class TestTacticalRules(unittest.TestCase):
         self.assertIsNotNone(action)
         self.assertEqual(action.get('tactical_rule'), 'AIR_SWARM_CLEAR')
         self.assertEqual(action.get('card_slot'), 0)  # Arrows
-        # Target must be centered on the minion swarm box
+        # Target must lead the moving Minions forward along their flight path towards tower
         pos = action.get('position')
-        self.assertEqual(pos, (170, 445))
-        print("  [PASS] Rule 4A: Direct Arrows strike on Minions swarm verified.")
+        self.assertTrue(pos[1] >= 445, f"Arrows must lead moving Minions forward! Got y={pos[1]}")
+        print("  [PASS] Rule 4A: Predictive Arrows strike leading Minions swarm verified.")
 
     def test_rule4_strictly_blocks_ground_melee_vs_minions(self):
         """Rule 4: Candidate trying to play Knight or Mini-Pekka against Minions MUST BE BLOCKED."""
@@ -406,6 +406,67 @@ class TestTacticalRules(unittest.TestCase):
         self.assertEqual(action.get('tactical_rule'), 'CENTER_PULL_DEFENSE')
         self.assertEqual(self.brain.get_active_threat_lane(), 'left')
         print("  [PASS] Rule 14: Tower Damage Sensor successfully detected tower hit and locked defense.")
+
+    # =================================================================
+    # RULE 16: Predictive Aim Calculation Engine
+    # =================================================================
+    def test_rule16_predictive_aim_calculation(self):
+        """Rule 16: Verifies calculate_predictive_aim leads moving enemies forward and clamps near tower."""
+        box = (150, 400, 210, 450)  # Minions crossing river (y ~ 425)
+        lead_pos = self.brain.calculate_predictive_aim(box, enemy_name='minions', spell_name='arrows')
+        self.assertTrue(lead_pos[1] > 425, f"Lead aim must be forward of current position! Got {lead_pos}")
+
+        # Near tower (y ~ 590): Lead must decay and clamp (no overshooting)
+        box_near_tower = (150, 580, 210, 600)
+        clamped_pos = self.brain.calculate_predictive_aim(box_near_tower, enemy_name='minions', spell_name='arrows')
+        clamped_y_pct = clamped_pos[1] / 1007
+        self.assertTrue(clamped_y_pct <= 0.61, f"Lead near tower must not overshoot! Got {clamped_y_pct}")
+        print("  [PASS] Rule 16: Predictive Aim Engine & Stop-Zone Clamping verified.")
+
+    # =================================================================
+    # RULE 17: Outward Safe Tower Calibration
+    # =================================================================
+    def test_rule17_outward_safe_tower_calibration(self):
+        """Rule 17: Princess tower snipes are calibrated outward away from King Tower."""
+        game_state = {
+            'hand': ['fireball', 'knight', 'archers', 'giant'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '150', 'ptr': '2400', 'tk': '4000'},
+            'enemies': []
+        }
+        action = self.brain.check_spell_finish(game_state)
+        pos = action.get('position')
+        norm_x = pos[0] / 565
+        # Left Princess Tower must be at 0.20 (outward safety), not inward towards King
+        self.assertAlmostEqual(norm_x, 0.20, delta=0.02)
+        print("  [PASS] Rule 17: Outward Safe Tower Calibration verified.")
+
+    # =================================================================
+    # RULE 18: Elixir Relief Valve (No Passivity Trap)
+    # =================================================================
+    def test_rule18_elixir_relief_valve_prevents_passivity(self):
+        """Rule 18: If candidate action was rejected but elixir >= 9.0, bot must safely cycle."""
+        game_state = {
+            'hand': ['arrows', 'giant', 'knight', 'archers'],
+            'elixir': 9.2,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': []  # No enemies on field
+        }
+        # Candidate wants to waste Arrows on empty grass (will be rejected)
+        bad_arrows = {'action': 'play_card', 'card_slot': 0, 'position': (300, 600)}
+        # Arbiter must reject bad_arrows and trigger safe Elixir Relief Cycle
+        action = self.brain.arbitrate_decision(game_state, dt_action=bad_arrows)
+        self.assertIsNotNone(action, "Elixir Relief Valve must prevent passivity at 9.2 elixir!")
+        self.assertEqual(action.get('tactical_rule'), 'ELIXIR_LEAK_CYCLE')
+
+        # Also verify agent integration: when model proposes a rejected move, agent relief valve fires
+        with unittest.mock.patch.object(self.agent, '_get_model_action', return_value=bad_arrows):
+            self.agent.set_epsilon(0.0)
+            agent_action = self.agent.decide_action(game_state, self.scaler)
+            self.assertIsNotNone(agent_action)
+            self.assertEqual(agent_action.get('tactical_rule'), 'ELIXIR_LEAK_CYCLE')
+
+        print("  [PASS] Rule 18: Elixir Relief Valve prevents passivity and forces safe cycling.")
 
     # =================================================================
     # END-TO-END TEST: Agent.decide_action with real weights
