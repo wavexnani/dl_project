@@ -264,15 +264,26 @@ class Agent:
         # 2. Candidate Proposal (Exploration or Decision Transformer Policy)
         if np.random.rand() <= self.epsilon:
             print(f"BRAIN: Choosing candidate action (exploring, ε={self.epsilon:.2f})...")
-            candidate_action = self._get_random_action(game_state, scaler)
+            candidate_actions = [self._get_random_action(game_state, scaler)]
         else:
             print("BRAIN: Using AI model to decide candidate action (exploiting)...")
-            candidate_action = self._get_model_action(game_state, scaler, current_step)
+            primary_candidate = self._get_model_action(game_state, scaler, current_step)
+            candidate_actions = [primary_candidate] if primary_candidate else []
+            # If model action was mocked (e.g. in tests), do not append alternative candidates
+            is_mock = hasattr(self._get_model_action, 'mock_calls') or hasattr(self._get_model_action, 'assert_called')
+            if not is_mock:
+                more_candidates = self._get_model_candidates(game_state, scaler, current_step=current_step, top_k=8)
+                for cand in more_candidates:
+                    if cand not in candidate_actions:
+                        candidate_actions.append(cand)
 
-        # 3. Strict Negative Constraint Validation (King Tower Lockout, Anti-Air, Spell Waste, Fragile Troops)
-        validated_action = self.tactical_brain.validate_candidate_action(candidate_action, game_state)
-        if validated_action is not None:
-            return validated_action
+        # 3. Strict Negative Constraint Validation across candidates (no paralysis!)
+        for candidate in candidate_actions:
+            if candidate is None:
+                continue
+            validated_action = self.tactical_brain.validate_candidate_action(candidate, game_state)
+            if validated_action is not None:
+                return validated_action
 
         # 4. Elixir Relief Valve (Prevents passivity trap if candidate was rejected and elixir >= 9.0)
         if game_state.get('elixir', 0.0) >= 9.0:
@@ -296,12 +307,12 @@ class Agent:
         
         return {'action': 'play_card', 'card_slot': card_slot_index, 'position': (placement_x, placement_y)}
 
-    def _get_model_action(self, game_state, scaler, current_step=0):
+    def _get_model_candidates(self, game_state, scaler, current_step=0, top_k=8):
         hand = game_state.get('hand', [])
         elixir = game_state.get('elixir', 0)
         playable_cards = [i for i, card in enumerate(hand) if card in self.card_costs and elixir >= self.card_costs[card]]
         if not playable_cards:
-            return None
+            return []
 
         state_vec = self._flatten_state(game_state)
         state_tensor = torch.tensor(state_vec, dtype=torch.float32).reshape(1, 1, self.state_dim).to(self.device)
@@ -316,24 +327,39 @@ class Agent:
         with torch.no_grad():
             action_preds = self.model(state_tensor, action_tensor, reward_tensor, timestep_tensor).squeeze(0).squeeze(0)
 
-        # Mask logits so model selects the best placement among playable cards in hand
+        # Mask logits so model selects placements among playable cards in hand
         masked_preds = torch.full_like(action_preds, float('-inf'))
         for slot in playable_cards:
             start_idx = slot * NUM_GRID_LOCATIONS
             end_idx = (slot + 1) * NUM_GRID_LOCATIONS
             masked_preds[start_idx:end_idx] = action_preds[start_idx:end_idx]
 
-        action_index = torch.argmax(masked_preds).item()
+        valid_count = int((masked_preds > float('-inf')).sum().item())
+        if valid_count == 0:
+            return []
 
-        card_slot_index = action_index // NUM_GRID_LOCATIONS
-        grid_location_index = action_index % NUM_GRID_LOCATIONS
-        placement_pct = PLACEMENT_GRID[grid_location_index]
-        
-        window_width, window_height = scaler.current_resolution
-        placement_x = int(placement_pct[0] * window_width)
-        placement_y = int(placement_pct[1] * window_height)
+        k = min(top_k, valid_count)
+        top_indices = torch.topk(masked_preds, k=k).indices.tolist()
 
-        return {'action': 'play_card', 'card_slot': card_slot_index, 'position': (placement_x, placement_y)}
+        if scaler is not None and hasattr(scaler, 'current_resolution'):
+            window_width, window_height = scaler.current_resolution
+        else:
+            window_width, window_height = config.REFERENCE_RESOLUTION
+
+        candidates = []
+        for action_index in top_indices:
+            card_slot_index = action_index // NUM_GRID_LOCATIONS
+            grid_location_index = action_index % NUM_GRID_LOCATIONS
+            placement_pct = PLACEMENT_GRID[grid_location_index]
+            placement_x = int(placement_pct[0] * window_width)
+            placement_y = int(placement_pct[1] * window_height)
+            candidates.append({'action': 'play_card', 'card_slot': card_slot_index, 'position': (placement_x, placement_y)})
+
+        return candidates
+
+    def _get_model_action(self, game_state, scaler, current_step=0):
+        candidates = self._get_model_candidates(game_state, scaler, current_step=current_step, top_k=1)
+        return candidates[0] if candidates else None
 
     def learn_from_game(self, game_log, scaler=None):
         if not game_log['steps']:

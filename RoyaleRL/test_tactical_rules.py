@@ -499,6 +499,87 @@ class TestTacticalRules(unittest.TestCase):
 
         print("  [PASS] End-to-End: Agent strictly obeys Tactical Brain across both exploitation & exploration!")
 
+    # =================================================================
+    # RULE 19: Strict Spell Spatial Radius Check & Base Protection
+    # =================================================================
+    def test_rule19_spells_blocked_on_friendly_base_without_enemies(self):
+        """Rule 19: Spells targeting friendly territory (y >= 0.45) MUST have enemies in splash radius."""
+        # 1. Candidate wants to throw Arrows on our own Right Tower (y=0.77) with no enemies there
+        game_state = {
+            'hand': ['arrows', 'giant', 'knight', 'archers'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{'name': 'valkyrie', 'box': (100, 300, 160, 360)}]  # Enemy is far away across river
+        }
+        own_tower_aim = {'action': 'play_card', 'card_slot': 0, 'position': (450, 780)}
+        validated = self.brain.validate_candidate_action(own_tower_aim, game_state)
+        self.assertIsNone(validated, "Throwing Arrows on our own tower without enemies nearby MUST BE BLOCKED!")
+
+        # 2. But if an enemy swarm is attacking our friendly tower, spell defense is ALLOWED!
+        game_state_defense = {
+            'hand': ['arrows', 'giant', 'knight', 'archers'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{'name': 'minions', 'box': (430, 760, 480, 810)}]  # Minions on our tower!
+        }
+        validated_defense = self.brain.validate_candidate_action(own_tower_aim, game_state_defense)
+        self.assertIsNotNone(validated_defense, "Defensive Arrows with enemies in splash radius must be allowed!")
+        print("  [PASS] Rule 19: Spell Spatial Radius & Friendly Tower Protection verified.")
+
+    # =================================================================
+    # RULE 20: Troop Deployment Territory Clamping
+    # =================================================================
+    def test_rule20_illegal_enemy_territory_troops_clamped(self):
+        """Rule 20: Troops placed across river (y < 0.50) with both towers up are clamped to friendly side."""
+        game_state = {
+            'hand': ['knight', 'musketeer', 'arrows', 'giant'],
+            'elixir': 4.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': []
+        }
+        # Model proposes Knight deep in enemy territory (y=0.33)
+        illegal_enemy_drop = {'action': 'play_card', 'card_slot': 0, 'position': (390, int(0.33 * 1007))}
+        validated = self.brain.validate_candidate_action(illegal_enemy_drop, game_state)
+        self.assertIsNotNone(validated)
+        clamped_y = validated.get('position')[1] / 1007
+        self.assertTrue(clamped_y >= 0.52, f"Clamped troop deployment y={clamped_y} must be on friendly side!")
+        print("  [PASS] Rule 20: Illegal enemy-territory troop deployments clamped to friendly side.")
+
+    # =================================================================
+    # RULE 21: Dormant King Tower Never Sniped on OCR Noise
+    # =================================================================
+    def test_rule21_dormant_king_never_sniped_on_ocr_noise(self):
+        """Rule 21: OCR noise showing King at 5 HP while both Princess towers live MUST NOT trigger spell finish."""
+        game_state = {
+            'hand': ['arrows', 'fireball', 'knight', 'giant'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000', 'tk': '5'},  # OCR noise!
+            'enemies': []
+        }
+        action = self.brain.check_spell_finish(game_state)
+        self.assertIsNone(action, "Must NEVER snipe dormant King Tower when both Princess Towers are alive!")
+        print("  [PASS] Rule 21: Dormant King Tower protected from OCR noise spell finishes.")
+
+    # =================================================================
+    # RULE 22: Multi-Candidate Fallback Prevents Analysis Paralysis
+    # =================================================================
+    def test_rule22_multi_candidate_fallback_prevents_paralysis(self):
+        """Rule 22: If top-1 action is rejected, decide_action seamlessly evaluates candidates without freezing."""
+        game_state = {
+            'hand': ['arrows', 'knight', 'musketeer', 'giant'],
+            'elixir': 5.0,
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': []  # Empty field
+        }
+        self.agent.set_epsilon(0.0)
+        action = self.agent.decide_action(game_state, self.scaler)
+        self.assertIsNotNone(action, "Agent must not freeze when top candidate is rejected!")
+        # Must not be Arrows on empty field
+        hand = game_state['hand']
+        slot = action.get('card_slot')
+        self.assertNotEqual(hand[slot], 'arrows', "Agent must not waste Arrows on empty grass!")
+        print("  [PASS] Rule 22: Multi-Candidate fallback successfully prevented passivity / paralysis.")
+
 
 if __name__ == '__main__':
     print(f"\n{'='*70}")

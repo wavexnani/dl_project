@@ -169,13 +169,19 @@ class TacticalBrain:
         return (int(pct_x * w), int(pct_y * h))
 
     def _parse_hp(self, hp_val):
-        """Safely parses HP value from OCR data."""
+        """Safely parses HP value from OCR data, stripping OCR level-badge noise."""
         if hp_val is None:
             return None
         try:
             cleaned = str(hp_val).strip().replace(',', '').replace(' ', '')
             val = int(cleaned)
-            return val if val > 0 else None
+            # If val > 5000, it's often a leading level badge digit (e.g. 41624 -> 1624)
+            if val > 5000:
+                s = str(val)
+                while len(s) > 4:
+                    s = s[1:]
+                val = int(s)
+            return val if 0 < val <= 5000 else None
         except (ValueError, TypeError):
             return None
 
@@ -263,11 +269,14 @@ class TacticalBrain:
         valid_towers = []
         for tid, hp_raw, (tx, ty), is_king in towers:
             hp = self._parse_hp(hp_raw)
-            if hp is not None and hp > 0:
+            if hp is not None and hp >= 40:
                 if is_king:
                     ptl_hp = self._parse_hp(ocr_data.get('ptl'))
                     ptr_hp = self._parse_hp(ocr_data.get('ptr'))
-                    if ptl_hp is not None and ptr_hp is not None and hp > SPELL_TOWER_DAMAGE['fireball']:
+                    # Strictly enforce King Tower dormancy: NEVER snipe King if BOTH Princess Towers are alive!
+                    if ptl_hp is not None and ptr_hp is not None:
+                        continue
+                    if hp > SPELL_TOWER_DAMAGE['fireball']:
                         continue
                 valid_towers.append((tid, hp, (tx, ty)))
 
@@ -370,22 +379,29 @@ class TacticalBrain:
         pbl_hp = self._parse_hp(ocr_data.get('pbl'))
         pbr_hp = self._parse_hp(ocr_data.get('pbr'))
 
-        if self.last_pbl_hp is not None and pbl_hp is not None and (self.last_pbl_hp - pbl_hp) >= 30:
+        # Only trigger if realistic damage drop (30 to 1200) - rejects OCR noise jumps
+        if self.last_pbl_hp is not None and pbl_hp is not None and 30 <= (self.last_pbl_hp - pbl_hp) <= 1200:
             print(f"🚨 [TOWER SENSOR] Left Tower damaged ({self.last_pbl_hp} -> {pbl_hp})! Locking emergency defense on LEFT lane!")
+            lane_enemies = [e for e in enemies if ((e.get('box', (0, 0, 0, 0))[0] + e.get('box', (0, 0, 0, 0))[2]) / 2.0 / cur_w) < 0.50]
+            threat_name = normalize_card_name(lane_enemies[0].get('name')) if lane_enemies else 'giant'
+            threat_score = THREAT_LEVELS.get(threat_name, 10)
             self.active_threat_memory.append({
-                'name': 'giant',
-                'score': 10,
+                'name': threat_name,
+                'score': threat_score,
                 'lane': 'left',
                 'x': 0.25,
                 'y': 0.60,
                 'box': (int(0.20 * cur_w), int(0.55 * cur_h), int(0.30 * cur_w), int(0.65 * cur_h)),
                 'timestamp': now
             })
-        elif self.last_pbr_hp is not None and pbr_hp is not None and (self.last_pbr_hp - pbr_hp) >= 30:
+        elif self.last_pbr_hp is not None and pbr_hp is not None and 30 <= (self.last_pbr_hp - pbr_hp) <= 1200:
             print(f"🚨 [TOWER SENSOR] Right Tower damaged ({self.last_pbr_hp} -> {pbr_hp})! Locking emergency defense on RIGHT lane!")
+            lane_enemies = [e for e in enemies if ((e.get('box', (0, 0, 0, 0))[0] + e.get('box', (0, 0, 0, 0))[2]) / 2.0 / cur_w) >= 0.50]
+            threat_name = normalize_card_name(lane_enemies[0].get('name')) if lane_enemies else 'giant'
+            threat_score = THREAT_LEVELS.get(threat_name, 10)
             self.active_threat_memory.append({
-                'name': 'giant',
-                'score': 10,
+                'name': threat_name,
+                'score': threat_score,
                 'lane': 'right',
                 'x': 0.75,
                 'y': 0.60,
@@ -636,25 +652,55 @@ class TacticalBrain:
             def_pos = self._to_pixels(0.47 if active_threat_lane == 'left' else 0.53, 0.63)
             return {'action': 'play_card', 'card_slot': slot, 'position': def_pos, 'tactical_rule': 'DEFENSIVE_LANE_LOCK'}
 
-        # ── Check Spell Waste Rules (Rule 8) ───────────────────────────
-        if card_name == 'arrows':
-            has_minions = any(normalize_card_name(e.get('name')) == 'minions' for e in enemies)
-            has_dense_cluster = len(enemies) >= 2
-            is_targeting_tower = (pos_pct[1] <= 0.22)
-            if not has_minions and not has_dense_cluster and not is_targeting_tower:
-                print("⛔ [RULE OVERRIDE] Blocked wasting Arrows with no swarm or tower target.")
-                return None
+        # ── Check Spell Spatial Value & Waste Rules (Rule 8) ────────────
+        if card_name in ('arrows', 'fireball'):
+            enemy_positions = []
+            for e in enemies:
+                bx = e.get('box', (0, 0, 0, 0))
+                ex_pct = ((bx[0] + bx[2]) / 2.0) / cur_w
+                ey_pct = ((bx[1] + bx[3]) / 2.0) / cur_h
+                enemy_positions.append((ex_pct, ey_pct))
 
-        if card_name == 'fireball':
-            if pos_pct[1] >= 0.60 and len(enemies) == 0:
-                print("⛔ [RULE OVERRIDE] Blocked wasting Fireball on empty friendly ground.")
-                return None
+            spell_radius = 0.14 if card_name == 'arrows' else 0.10
+            has_enemy_in_radius = any(
+                np.hypot(pos_pct[0] - ex, pos_pct[1] - ey) <= (spell_radius + 0.05)
+                for ex, ey in enemy_positions
+            )
+            is_targeting_tower = (pos_pct[1] <= 0.22)
+
+            # Friendly base / Friendly towers (pos_pct[1] >= 0.45):
+            if pos_pct[1] >= 0.45:
+                # STRICT: NEVER throw spells on friendly ground unless enemy is inside splash radius!
+                if not has_enemy_in_radius:
+                    print(f"⛔ [RULE OVERRIDE] Blocked wasting {card_name.upper()} on friendly base/towers with no enemies in splash radius.")
+                    return None
+
+            # Enemy territory (pos_pct[1] < 0.45):
+            else:
+                if not is_targeting_tower and not has_enemy_in_radius:
+                    print(f"⛔ [RULE OVERRIDE] Blocked wasting {card_name.upper()} on empty enemy grass with no tower or troops.")
+                    return None
 
         # ── Check Fragile Troop Protection (Rule 9) ────────────────────
         if card_name in ('musketeer', 'archers') and pos_pct[1] < 0.52:
             safe_pos = (pos[0], int(pos[1] + 0.14 * cur_h))
             print(f"🛡️ [RULE OVERRIDE] Pulled {card_name.upper()} back behind river for safety.")
             return {'action': 'play_card', 'card_slot': slot, 'position': safe_pos, 'tactical_rule': 'TANK_IN_FRONT_SEQUENCING'}
+
+        # ── Check Valid Troop Deployment Bounds (Rule 20) ──────────────
+        # Troops (non-spells) cannot be placed on enemy grass (Y < 0.50) unless that tower is destroyed
+        if card_name not in ('fireball', 'arrows') and pos_pct[1] < 0.50:
+            ocr_data = game_state.get('ocr_data', {})
+            left_dead = (self._parse_hp(ocr_data.get('ptl')) is None)
+            right_dead = (self._parse_hp(ocr_data.get('ptr')) is None)
+            target_lane = 'left' if pos_pct[0] < 0.50 else 'right'
+            tower_destroyed = (left_dead if target_lane == 'left' else right_dead)
+
+            if not tower_destroyed:
+                safe_y = int(0.54 * cur_h)
+                clamped_pos = (pos[0], safe_y)
+                print(f"🛡️ [RULE OVERRIDE] Clamped illegal deployment of {card_name.upper()} back to friendly side ({pos_pct[0]:.2f}, 0.54).")
+                return {'action': 'play_card', 'card_slot': slot, 'position': clamped_pos, 'tactical_rule': 'VALID_DEPLOYMENT_CLAMP'}
 
         # ── Check Dynamic Lane Defense Adaptation (Rule 11) ────────────
         threat_lane = active_threat_lane
