@@ -48,7 +48,11 @@ STATE_DIM = 1 + 6 + (4 * NUM_CARD_TYPES) + (20 * 4)
 
 def find_cards_dynamically(scaler):
     game_area = scaler.game_area_rect
-    bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
+    gx1 = max(0, game_area[0])
+    gy1 = max(0, game_area[1])
+    gx2 = max(gx1 + 10, game_area[0] + game_area[2])
+    gy2 = max(gy1 + 10, game_area[1] + game_area[3])
+    bbox = (gx1, gy1, gx2, gy2)
     screenshot_pil = ImageGrab.grab(bbox=bbox)
     sx = getattr(scaler, 'x_scale', 1.0)
     sy = getattr(scaler, 'y_scale', 1.0)

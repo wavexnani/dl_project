@@ -53,7 +53,11 @@ class GameStateManager:
     def get_state(self):
         """Returns screen navigation state (never returns WIN_CROWN/LOSE_CROWN)."""
         game_area_rect = self.scaler.game_area_rect
-        bbox = (game_area_rect[0], game_area_rect[1], game_area_rect[0] + game_area_rect[2], game_area_rect[1] + game_area_rect[3])
+        gx1 = max(0, game_area_rect[0])
+        gy1 = max(0, game_area_rect[1])
+        gx2 = max(gx1 + 10, game_area_rect[0] + game_area_rect[2])
+        gy2 = max(gy1 + 10, game_area_rect[1] + game_area_rect[3])
+        bbox = (gx1, gy1, gx2, gy2)
         screen_pil = ImageGrab.grab(bbox=bbox)
         screen_cv_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
 
@@ -318,10 +322,14 @@ class GameStateManager:
                 if tk == '0' or tk == 0:
                     enemy_king_destroyed = True
 
-        # Phase 1: Spatial OCR across multiple frames
+        # Phase 1: Spatial OCR across multiple frames (Vertical Clash Royale Layout: Opponent Top, Player Bottom)
         print("🔍 [RESULT] Scanning screen with spatial OCR for match result banner...")
         for attempt in range(5):
-            bbox = (game_area[0], game_area[1], game_area[0] + game_area[2], game_area[1] + game_area[3])
+            gx1 = max(0, game_area[0])
+            gy1 = max(0, game_area[1])
+            gx2 = max(gx1 + 10, game_area[0] + game_area[2])
+            gy2 = max(gy1 + 10, game_area[1] + game_area[3])
+            bbox = (gx1, gy1, gx2, gy2)
             screen_pil = ImageGrab.grab(bbox=bbox)
 
             try:
@@ -340,65 +348,99 @@ class GameStateManager:
             opp_winner_detected = False
             player_trophy_loss = False
             player_trophy_gain = False
-            opp_trophy_gain = False
             crown_candidate = None
 
+            vs_ny = None
+            player_ny = None
+            winner_ny = None
+            winner_text = ""
+
+            # Pass 1: Discover vertical landmarks
             for box, text, conf in detections:
                 t_str = str(text).strip()
                 t_clean = t_str.upper().replace(' ', '').replace("'", "")
-                cx = sum(p[0] for p in box) / 4.0
                 cy = sum(p[1] for p in box) / 4.0
-                nx = cx / cur_w
                 ny = cy / cur_h
-                token_logs.append(f"'{t_str}'(x={nx:.2f})")
-
-                # Check Winner banner
+                
+                if t_clean in ('VS', 'V.S', 'V'):
+                    vs_ny = ny
+                if 'mouli' in t_str.lower():
+                    player_ny = ny
                 if any(kw in t_clean for kw in winner_keywords):
-                    if nx < 0.48:
-                        opp_winner_detected = True
-                        print(f"   🚨 Detected WINNER banner on LEFT (Opponent side, x={nx:.2f}): '{t_str}'")
-                    else:
-                        player_winner_detected = True
-                        print(f"   🏆 Detected WINNER banner on RIGHT (Player side, x={nx:.2f}): '{t_str}'")
+                    winner_ny = ny
+                    winner_text = t_str
 
-                # Check Defeat banner
+            # Pass 2: Evaluate tokens with landmark context
+            for box, text, conf in detections:
+                t_str = str(text).strip()
+                t_clean = t_str.upper().replace(' ', '').replace("'", "")
+                cy = sum(p[1] for p in box) / 4.0
+                ny = cy / cur_h
+                token_logs.append(f"'{t_str}'(y={ny:.2f})")
+
+                # Defeat text
                 if any(kw in t_clean for kw in ["DEFEAT", "YOULOSE", "LOST", "DEFAITE"]):
                     opp_winner_detected = True
                     print(f"   🚨 Detected DEFEAT text on screen: '{t_str}'")
 
-                # Check Victory banner
+                # Victory text
                 if any(kw in t_clean for kw in ["VICTORY", "YOUWIN", "VICTOIRE"]):
                     player_winner_detected = True
                     print(f"   🏆 Detected VICTORY text on screen: '{t_str}'")
 
-                # Check Trophy indicators (+30 vs -30)
-                if nx >= 0.48:
-                    if '-' in t_str and any(c.isdigit() for c in t_str):
-                        player_trophy_loss = True
-                        print(f"   🚨 Detected NEGATIVE trophy change on Player side (x={nx:.2f}): '{t_str}'")
-                    elif '+' in t_str and any(c.isdigit() for c in t_str):
-                        player_trophy_gain = True
-                        print(f"   🏆 Detected POSITIVE trophy change on Player side (x={nx:.2f}): '{t_str}'")
-                else:
-                    if '+' in t_str and any(c.isdigit() for c in t_str):
-                        opp_trophy_gain = True
-                        print(f"   🚨 Detected POSITIVE trophy change on Opponent side (x={nx:.2f}): '{t_str}'")
+                # Trophy detection: NEVER parse usernames like 'Mouli-3' as trophies!
+                if not any(c.isalpha() for c in t_str):
+                    m = re.search(r'([+\-])\s*(\d{1,3})', t_str)
+                    if m:
+                        sign = m.group(1)
+                        val = int(m.group(2))
+                        if 15 <= val <= 45:
+                            if sign == '+':
+                                player_trophy_gain = True
+                                print(f"   🏆 Detected POSITIVE trophy gain (+{val}) at y={ny:.2f}: '{t_str}'")
+                            elif sign == '-':
+                                player_trophy_loss = True
+                                print(f"   🚨 Detected NEGATIVE trophy loss (-{val}) at y={ny:.2f}: '{t_str}'")
 
-                # Extract Crown number if near middle screen
-                if 0.30 <= ny <= 0.65:
+                # Crown extraction
+                if 0.35 <= ny <= 0.60:
                     cleaned_digit = ''.join(c for c in t_str if c.isdigit())
                     if cleaned_digit in ('1', '2', '3'):
                         crown_candidate = int(cleaned_digit)
 
+            # Evaluate Winner Banner relative to VS and Player
+            if winner_ny is not None:
+                if vs_ny is not None:
+                    if winner_ny > vs_ny:
+                        player_winner_detected = True
+                        print(f"   🏆 WINNER banner '{winner_text}' is BELOW VS (y={winner_ny:.2f} > vs_y={vs_ny:.2f}) -> Local Player WON!")
+                    else:
+                        opp_winner_detected = True
+                        print(f"   🚨 WINNER banner '{winner_text}' is ABOVE VS (y={winner_ny:.2f} < vs_y={vs_ny:.2f}) -> Opponent WON!")
+                elif player_ny is not None:
+                    if abs(winner_ny - player_ny) < 0.22:
+                        player_winner_detected = True
+                        print(f"   🏆 WINNER banner '{winner_text}' is adjacent to Player '{player_ny:.2f}' -> Local Player WON!")
+                    else:
+                        opp_winner_detected = True
+                        print(f"   🚨 WINNER banner '{winner_text}' is far above Player -> Opponent WON!")
+                else:
+                    if winner_ny >= 0.33:
+                        player_winner_detected = True
+                        print(f"   🏆 WINNER banner '{winner_text}' is in lower half (y={winner_ny:.2f}) -> Local Player WON!")
+                    else:
+                        opp_winner_detected = True
+                        print(f"   🚨 WINNER banner '{winner_text}' is in upper half (y={winner_ny:.2f}) -> Opponent WON!")
+
             print(f"   [Frame {attempt+1}] Spatial OCR: {', '.join(token_logs[:12])}")
 
             # Synthesize Frame Verdict
-            if opp_winner_detected or player_trophy_loss or (opp_trophy_gain and not player_winner_detected):
-                ocr_result = "LOSS"
+            if player_winner_detected or player_trophy_gain:
+                ocr_result = "WIN"
                 winner_crowns = crown_candidate or 3
                 break
-            elif player_winner_detected or (player_trophy_gain and not opp_winner_detected):
-                ocr_result = "WIN"
+            elif opp_winner_detected or player_trophy_loss:
+                ocr_result = "LOSS"
                 winner_crowns = crown_candidate or 3
                 break
 

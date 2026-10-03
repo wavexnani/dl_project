@@ -69,10 +69,11 @@ class Scaler:
     def _find_game_area_by_combined_methods(self, bluestacks_window):
 
         bluestacks_rect = (bluestacks_window.left, bluestacks_window.top, bluestacks_window.width, bluestacks_window.height)
-        # ImageGrab.grab needs (left, top, right, bottom)
-        grab_bbox = (bluestacks_window.left, bluestacks_window.top, 
-                     bluestacks_window.left + bluestacks_window.width, 
-                     bluestacks_window.top + bluestacks_window.height)
+        gx1 = max(0, bluestacks_window.left)
+        gy1 = max(0, bluestacks_window.top)
+        gx2 = max(gx1 + 10, bluestacks_window.left + bluestacks_window.width)
+        gy2 = max(gy1 + 10, bluestacks_window.top + bluestacks_window.height)
+        grab_bbox = (gx1, gy1, gx2, gy2)
         screenshot_pil = ImageGrab.grab(bbox=grab_bbox)
         screenshot_np = np.array(screenshot_pil)
         
