@@ -303,7 +303,7 @@ def main():
                                     box = battle_coords["cards"][slot]
                                     click_x, click_y = box[0] + box[2] // 2, box[1] + box[3] // 2
                                     print(f"⚡ [PLAY CARD] Executing {rule_name} (Slot {slot} at {pos})")
-                                    controller.play_card((click_x, click_y), pos)
+                                    controller.play_card((click_x, click_y), pos, slot=slot)
                                     # Deduct elixir for played card
                                     hand = current_game_state.get('hand', [])
                                     if 0 <= slot < len(hand):

@@ -91,14 +91,20 @@ class Controller:
             time.sleep(0.5)
 
 
-    def play_card(self, card_slot_coords, placement_coords):
+    @property
+    def game_area_offset_x(self):
+        return self.scaler.game_area_rect[0]
+
+    @property
+    def game_area_offset_y(self):
+        return self.scaler.game_area_rect[1]
+
+    def play_card(self, card_slot_coords, placement_coords, slot=None):
         """
-        Reliably deploys a card using direct drag-and-drop from the card slot to the arena tile,
-        followed by confirmation tap. Guarantees 100% card deployment in BlueStacks.
+        Reliably deploys a card using direct two-step tap (Click Card Slot -> Click Arena Tile).
+        No drag-and-drop.
         """
         card_click_x, card_click_y = card_slot_coords
-        
-        # ---Bounding Box Clamping Logic ---
         
         # 1. Get the game window's current dimensions
         window_width, window_height = self.scaler.current_resolution
@@ -112,9 +118,7 @@ class Controller:
         # 3. Get the requested placement coordinates
         requested_x, requested_y = placement_coords
 
-        # 4. "Clamp" the coordinates to ensure they are within the bounding box
-        # The max() function ensures the value is not less than the minimum boundary.
-        # The min() function ensures the value is not more than the maximum boundary.
+        # 4. Clamp the coordinates to ensure they are within the arena bounding box
         clamped_x = max(min_x_abs, min(requested_x, max_x_abs))
         clamped_y = max(min_y_abs, min(requested_y, max_y_abs))
         abs_card_x = self.game_area_offset_x + card_click_x
@@ -122,18 +126,25 @@ class Controller:
         abs_target_x = self.game_area_offset_x + clamped_x
         abs_target_y = self.game_area_offset_y + clamped_y
 
-        print(f"CONTROLLER: Card ({abs_card_x}, {abs_card_y}) -> Target ({abs_target_x}, {abs_target_y})")
-        # Swift drag-and-drop: pickup card from slot and drop onto arena
-        pyautogui.moveTo(abs_card_x, abs_card_y)
-        pyautogui.mouseDown(button='left')
-        time.sleep(0.05)
-        pyautogui.moveTo(abs_target_x, abs_target_y, duration=0.12)
-        time.sleep(0.04)
-        pyautogui.mouseUp(button='left')
-        # Confirm with tap on arena
-        time.sleep(0.04)
-        pyautogui.click(abs_target_x, abs_target_y)
-        time.sleep(0.12)
+        slot_label = f" (Slot {slot + 1})" if slot is not None else ""
+        print(f"🎮 [CONTROLLER] Deploying{slot_label}: Tap card ({abs_card_x}, {abs_card_y}) -> Tap arena ({abs_target_x}, {abs_target_y})")
+
+        # Step 0: Optional hotkey selection (1-4) in BlueStacks
+        if slot is not None and 0 <= slot <= 3:
+            try:
+                pyautogui.press(str(slot + 1))
+            except Exception:
+                pass
+
+        # Step 1: Click the card slot to select it
+        pyautogui.moveTo(abs_card_x, abs_card_y, duration=0.03)
+        pyautogui.click()
+        time.sleep(0.08)
+
+        # Step 2: Click the target arena position to deploy the card
+        pyautogui.moveTo(abs_target_x, abs_target_y, duration=0.03)
+        pyautogui.click()
+        time.sleep(0.08)
 
 
     def find_and_click(self, template_path, confidence=0.70):
