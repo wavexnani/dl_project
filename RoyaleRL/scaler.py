@@ -95,41 +95,58 @@ class Scaler:
             print("Could not find the top edge via color scan. Assuming fullscreen/borderless.")
             top_edge_y = 0
 
-        # --- Try to Find Horizontal Boundaries using Contours ---
-        # This works when BlueStacks is fullscreened on a widescreen monitor with black bars
-        cropped_screenshot = screenshot_np[top_edge_y + 100:, :]
-        cropped_screenshot_gray = cv2.cvtColor(cropped_screenshot, cv2.COLOR_RGB2GRAY)
-        ret, thresh = cv2.threshold(cropped_screenshot_gray, 10, 255, cv2.THRESH_BINARY_INV)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:2]
+        # --- Try to Find Horizontal Boundaries ---
+        final_height = bluestacks_window.height - top_edge_y
+        win_w = bluestacks_window.width
+        win_h = max(1, bluestacks_window.height)
+        aspect_ratio = win_w / win_h
         
         x_start = 0
-        width = bluestacks_window.width
+        width = win_w
         
-        if len(contours) >= 2:
-            bounding_boxes = [cv2.boundingRect(c) for c in contours]
-            left_box = min(bounding_boxes, key=lambda b: b[0])
-            right_box = max(bounding_boxes, key=lambda b: b[0])
-            
-            candidate_x_start = left_box[0] + left_box[2]
-            candidate_width = right_box[0] - candidate_x_start
-            
-            # Only use contour-based boundaries if they make sense
-            # (width should be at least 40% of window width to be a real game area)
-            if candidate_width > bluestacks_window.width * 0.4:
-                x_start = candidate_x_start
-                width = candidate_width
-                print(f"Game area detected via contour method: x_start={x_start}, width={width}")
-            else:
-                print(f"Contour detection found narrow area ({candidate_width}px). "
-                      f"Falling back to full window mode.")
+        # If the window is already in portrait mode (W/H < 0.85, typical ~0.56),
+        # Clash Royale fills the entire window width without pillarbox black bars.
+        if aspect_ratio < 0.85:
+            print(f"Portrait BlueStacks window detected (aspect ratio {aspect_ratio:.2f} < 0.85). "
+                  f"Using full window width ({win_w}px).")
         else:
-            print("Not enough contours found. Using full window mode.")
+            # Widescreen monitor mode: BlueStacks is widescreen and has genuine black bars on sides
+            cropped_screenshot = screenshot_np[top_edge_y + 100:, :]
+            cropped_screenshot_gray = cv2.cvtColor(cropped_screenshot, cv2.COLOR_RGB2GRAY)
+            ret, thresh = cv2.threshold(cropped_screenshot_gray, 10, 255, cv2.THRESH_BINARY_INV)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)[:2]
             
+            if len(contours) >= 2:
+                bounding_boxes = [cv2.boundingRect(c) for c in contours]
+                left_box = min(bounding_boxes, key=lambda b: b[0])
+                right_box = max(bounding_boxes, key=lambda b: b[0])
+                
+                # Check that left box touches the left edge and right box reaches near the right edge
+                touches_left = left_box[0] <= win_w * 0.10
+                touches_right = (right_box[0] + right_box[2]) >= win_w * 0.90
+                
+                candidate_x_start = left_box[0] + left_box[2]
+                candidate_width = right_box[0] - candidate_x_start
+                candidate_ratio = candidate_width / max(1, final_height)
+                
+                if touches_left and touches_right and 0.45 <= candidate_ratio <= 0.70:
+                    x_start = candidate_x_start
+                    width = candidate_width
+                    print(f"Game area detected via widescreen pillarbox method: x_start={x_start}, width={width}")
+                else:
+                    # Fallback to standard 9:16 aspect ratio centered in widescreen window
+                    ideal_width = min(win_w, int(final_height * (config.REFERENCE_RESOLUTION[0] / config.REFERENCE_RESOLUTION[1])))
+                    x_start = max(0, (win_w - ideal_width) // 2)
+                    width = ideal_width
+                    print(f"Widescreen detected without clear pillarboxes. Centering 9:16 game area: x_start={x_start}, width={width}")
+            else:
+                ideal_width = min(win_w, int(final_height * (config.REFERENCE_RESOLUTION[0] / config.REFERENCE_RESOLUTION[1])))
+                x_start = max(0, (win_w - ideal_width) // 2)
+                width = ideal_width
+                print(f"Widescreen mode: Centering 9:16 game area: x_start={x_start}, width={width}")
+                
         # --- Calculate Final Bounding Box ---
-        final_height = bluestacks_window.height - top_edge_y
-        
         print(f"Game area: x={bluestacks_window.left + x_start}, y={bluestacks_window.top + top_edge_y}, "
               f"w={width}, h={final_height}")
 

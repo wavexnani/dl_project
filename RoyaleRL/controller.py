@@ -136,7 +136,7 @@ class Controller:
         time.sleep(0.12)
 
 
-    def find_and_click(self, template_path, confidence=0.85):
+    def find_and_click(self, template_path, confidence=0.70):
 
         template_img = self.scaler.scale_template(template_path)
         

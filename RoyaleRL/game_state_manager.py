@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import ImageGrab
 import os
+import re
 import time
 from controller import Controller
 import config
@@ -62,29 +63,87 @@ class GameStateManager:
         screen_cv_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
 
         STATE_THRESHOLDS = {
-            "IN_BATTLE": 0.68,
-            "POST_BATTLE": 0.75,
-            "POST_BATTLE_2": 0.75,
-            "MAIN_MENU": 0.80,
-            "LUCKY_BOX": 0.80
+            "POST_BATTLE": 0.63,
+            "POST_BATTLE_2": 0.63,
+            "MAIN_MENU": 0.75,
+            "LUCKY_BOX": 0.75,
+            "IN_BATTLE": 0.68
         }
 
-        # Select the highest-confidence matching state above threshold
+        # Select matching state above threshold with priority for post-battle / menu
         best_state = "UNKNOWN"
         best_val = 0.0
 
         for state in self._screen_state_keys:
             anchor_img = self.anchors.get(state)
             if anchor_img is None: continue
-            thresh = STATE_THRESHOLDS.get(state, 0.80)
+            thresh = STATE_THRESHOLDS.get(state, 0.75)
             res = cv2.matchTemplate(screen_cv_gray, anchor_img, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
-            if max_val >= thresh and max_val > best_val:
-                best_val = max_val
-                best_state = state
+            if max_val >= thresh:
+                # Prioritize post-battle and main-menu states over IN_BATTLE
+                # (since an OK button never appears during actual fighting)
+                if state in ("POST_BATTLE", "POST_BATTLE_2"):
+                    if best_state not in ("POST_BATTLE", "POST_BATTLE_2") or max_val > best_val:
+                        best_val = max_val
+                        best_state = state
+                elif state == "MAIN_MENU":
+                    if best_state not in ("POST_BATTLE", "POST_BATTLE_2") and max_val > best_val:
+                        best_val = max_val
+                        best_state = state
+                else:
+                    if best_state not in ("POST_BATTLE", "POST_BATTLE_2", "MAIN_MENU") and max_val > best_val:
+                        best_val = max_val
+                        best_state = state
 
         self._update_internal_state(best_state)
         return best_state
+
+    def check_battle_ended(self, current_status=None, battle_duration=0, vision=None):
+        """
+        Multi-signal check to determine if the battle has terminated:
+        1. Checks if current_status is POST_BATTLE, POST_BATTLE_2, or MAIN_MENU.
+        2. Direct template check on ok_anchor and ok_anchor2 with adaptive threshold (>= 0.60).
+        3. If match duration >= 35s, runs quick OCR check on lower screen for 'OK', 'Play Again', etc.
+        Returns: (has_ended: bool, reason: str or None)
+        """
+        if current_status in ("POST_BATTLE", "POST_BATTLE_2"):
+            return True, f"Detected state '{current_status}'"
+        if current_status == "MAIN_MENU":
+            return True, "Returned to MAIN_MENU"
+
+        # Check ok templates directly
+        game_area_rect = self.scaler.game_area_rect
+        gx1 = max(0, game_area_rect[0])
+        gy1 = max(0, game_area_rect[1])
+        gx2 = max(gx1 + 10, game_area_rect[0] + game_area_rect[2])
+        gy2 = max(gy1 + 10, game_area_rect[1] + game_area_rect[3])
+        bbox = (gx1, gy1, gx2, gy2)
+        try:
+            screen_pil = ImageGrab.grab(bbox=bbox)
+            screen_cv_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
+
+            for anchor_name in ("POST_BATTLE", "POST_BATTLE_2"):
+                anchor_img = self.anchors.get(anchor_name)
+                if anchor_img is not None:
+                    res = cv2.matchTemplate(screen_cv_gray, anchor_img, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(res)
+                    if max_val >= 0.60:
+                        return True, f"Direct template match on {anchor_name} (conf={max_val:.2f})"
+
+            # If battle has lasted more than 35s, check OCR for end-of-battle keywords
+            if battle_duration >= 35 and vision and hasattr(vision, 'reader'):
+                h = screen_pil.height
+                bottom_crop = screen_pil.crop((0, int(h * 0.60), screen_pil.width, h))
+                ocr_detections = vision.reader.readtext(np.array(bottom_crop), detail=0, text_threshold=0.4)
+                for txt in ocr_detections:
+                    clean = str(txt).upper().replace(' ', '')
+                    if any(kw in clean for kw in ("OK", "PLAYAGAIN", "CONTINUE", "VICTORY", "DEFEAT")):
+                        return True, f"Detected post-battle button text: '{txt}'"
+        except Exception:
+            pass
+
+        return False, None
 
     def _update_internal_state(self, state):
         if state != self.current_state:
@@ -121,14 +180,14 @@ class GameStateManager:
     def start_match(self):
         print("Attempting to start match...")
         for name in ('sorted_data/anchors/battle_anchor.png', 'sorted_data/anchors/battle_anchor.PNG'):
-            if os.path.exists(name) and self.controller.find_and_click(name):
+            if os.path.exists(name) and self.controller.find_and_click(name, confidence=0.70):
                 return True
         return False
 
     def end_match(self):
         print("Attempting to end match...")
         for name in ('sorted_data/anchors/ok_anchor.png', 'sorted_data/anchors/ok_anchor.PNG'):
-            if os.path.exists(name) and self.controller.find_and_click(name):
+            if os.path.exists(name) and self.controller.find_and_click(name, confidence=0.65):
                 return True
         return False
     
@@ -136,10 +195,10 @@ class GameStateManager:
         print("Attempting to fix...")
         for _ in range(5):
             for name in ('sorted_data/anchors/luckybox2.png', 'sorted_data/anchors/luckybox2.PNG'):
-                if os.path.exists(name) and self.controller.find_and_click(name):
+                if os.path.exists(name) and self.controller.find_and_click(name, confidence=0.70):
                     break
         for name in ('sorted_data/anchors/ok_anchor2.png', 'sorted_data/anchors/ok_anchor2.PNG'):
-            if os.path.exists(name) and self.controller.find_and_click(name):
+            if os.path.exists(name) and self.controller.find_and_click(name, confidence=0.65):
                 return True
         return False
     

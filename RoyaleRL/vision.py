@@ -119,7 +119,9 @@ class ElixirTracker:
         if self.tracking_started and visual_elixir is not None and isinstance(visual_elixir, (int, float)):
             if 0 <= visual_elixir <= 10:
                 diff = abs(self.current_elixir - float(visual_elixir))
-                if diff >= 1.0:
+                # Only accept sync if deviation is reasonable (<= 3.5)
+                # to prevent single-frame optical template noise (e.g. 1 misread as 10)
+                if 1.0 <= diff <= 3.5:
                     print(f"💧 [ELIXIR SYNC] Correcting from {self.current_elixir:.1f} to {float(visual_elixir):.1f}")
                     self.current_elixir = float(visual_elixir)
 
@@ -189,7 +191,7 @@ class ElixirVision:
         screenshot_gray = cv2.cvtColor(np.array(screenshot_region), cv2.COLOR_RGB2GRAY)
         
         best_match = None
-        best_val = 0.55  # Adaptive threshold suitable for scaled templates
+        best_val = 0.65  # Stricter threshold to avoid false positive '10' on '1' or '0'
         
         for value, template in self.templates.items():
             if template is None:
@@ -226,6 +228,7 @@ class Vision:
         self.last_visual_check_time = time.time()
         self.last_known_hand = []
         self.last_update_time = time.time()
+        self.consecutive_invalid_hand = 0
     
     def _draw_debug_overlay(self, screenshot_cv, card_coordinates):
         """Draws all OCR and card boxes on a screenshot for debugging."""
@@ -299,10 +302,16 @@ class Vision:
         current_hand = self.classifier.predict_batch(cards_to_predict)
         
         invalid_slots = current_hand.count('empty') + current_hand.count('Unknown')
-        if invalid_slots >= 2: 
-            self.elixir_tracker.reset()
-        elif invalid_slots == 0 and not self.elixir_tracker.tracking_started: 
-            self.elixir_tracker.start()
+        if invalid_slots >= 2:
+            self.consecutive_invalid_hand += 1
+            # Only pause tracking if hand is absent for sustained period (>= 8 frames / ~2.5s)
+            # This prevents card deployment animations from resetting the elixir tracker mid-game
+            if self.consecutive_invalid_hand >= 8:
+                self.elixir_tracker.reset()
+        else:
+            self.consecutive_invalid_hand = 0
+            if invalid_slots == 0 and not self.elixir_tracker.tracking_started:
+                self.elixir_tracker.start()
 
         if current_hand != self.last_known_hand:
             self.last_known_hand = current_hand

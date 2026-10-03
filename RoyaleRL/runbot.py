@@ -205,24 +205,33 @@ def main():
                     battle_loop_active = True
                     consecutive_non_battle = 0
                     while battle_loop_active:
+                        now = time.time()
+                        battle_duration = now - battle_start_time
+
                         # Watchdog check for stuck battle (safe in-battle mode: no random clicks in arena)
                         watchdog_res = state_manager.check_and_recover_if_stuck(battle_timeout=280, in_battle=True)
                         current_status = state_manager.get_state()
 
                         battle_has_ended = False
-                        if current_status in ("POST_BATTLE", "POST_BATTLE_2"):
-                            print(f"🏁 Battle ended (Detected '{current_status}').")
+                        # Multi-signal battle end detector: templates, OCR, state priority
+                        has_ended, end_reason = state_manager.check_battle_ended(
+                            current_status=current_status, battle_duration=battle_duration, vision=vision
+                        )
+                        if has_ended:
+                            print(f"🏁 Battle ended ({end_reason}).")
                             battle_has_ended = True
                         elif current_status == "UNKNOWN":
                             consecutive_non_battle += 1
-                            if consecutive_non_battle >= 5:  # ~2.5 seconds sustained UNKNOWN
+                            if consecutive_non_battle >= 4:  # ~1.8 seconds sustained UNKNOWN
                                 print("🏁 Battle ended (Left IN_BATTLE state).")
                                 battle_has_ended = True
                         elif watchdog_res == "BATTLE_TIMEOUT":
                             print("🏁 Battle ended (Watchdog timeout reached).")
                             battle_has_ended = True
+                        elif battle_duration >= 35 and getattr(vision, 'consecutive_invalid_hand', 0) >= 8:
+                            print("🏁 Battle ended (Card deck absent for sustained duration).")
+                            battle_has_ended = True
                         else:
-                            # Confirmed still IN_BATTLE
                             consecutive_non_battle = 0
 
                         if battle_has_ended:
