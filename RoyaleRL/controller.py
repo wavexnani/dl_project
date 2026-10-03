@@ -54,12 +54,29 @@ class Controller:
             return None
 
     def click(self, x, y):
-        """Moves to and clicks a given coordinate using genuine OS mouse input."""
+        """Moves to and clicks a given coordinate."""
+        user32 = ctypes.windll.user32
+        # Use PostMessage directly to the BlueStacks Qt window if available
+        if self.target_hwnd:
+            try:
+                lParam = ((int(y)) << 16) | (int(x) & 0xFFFF)
+                MK_LBUTTON = 0x0001
+                WM_LBUTTONDOWN = 0x0201
+                WM_LBUTTONUP = 0x0202
+                user32.PostMessageW(self.target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam)
+                time.sleep(0.12)
+                user32.PostMessageW(self.target_hwnd, WM_LBUTTONUP, 0, lParam)
+                time.sleep(0.3)
+                return
+            except Exception as e:
+                print(f"PostMessage click failed, falling back to pyautogui: {e}")
+
+        # Convert relative game coordinates to absolute screen coordinates
         abs_x = self.game_area_offset_x + x
         abs_y = self.game_area_offset_y + y
-        pyautogui.moveTo(abs_x, abs_y, duration=0.04)
+        pyautogui.moveTo(abs_x, abs_y, duration=0.1)
         pyautogui.click()
-        time.sleep(0.15)
+        time.sleep(0.5)
 
     def send_escape(self):
         """Sends the Escape key to BlueStacks (acts as Android Back button)."""
