@@ -315,6 +315,7 @@ class Vision:
 
         if current_hand != self.last_known_hand:
             self.last_known_hand = current_hand
+            print(f"🃏 [HAND] Detected Hand: {self.last_known_hand} | Elixir: {self.elixir_tracker.current_elixir:.1f}")
         
         detected_enemies = self.enemy_detector.detect_units(screenshot)
             

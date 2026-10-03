@@ -50,11 +50,11 @@ THREAT_LEVELS = {
     'motherwitch': 8, 'princess': 8, 'minions': 8, 'minionhorde': 8,
     'infernodragon': 8, 'babydragon': 8, 'edragon': 8,
 
-    # ── Tier 4: Swarms & Fast Attackers (Threat 7) ──
-    'goblin': 7, 'speargoblin': 7, 'skeleton': 7, 'guards': 7, 'bat': 7,
-    'firecracker': 7, 'rascalboy': 7, 'rascalgirl': 7, 'barbarian': 7,
-    'royalrecruits': 7, 'zappies': 7, 'evofirecracker': 7, 'evoskeleton': 7,
-    'evobomber': 7, 'evobat': 7,
+    # ── Tier 4: Swarms & Fast Attackers (Threat 4) ──
+    'goblin': 4, 'speargoblin': 4, 'skeleton': 3, 'guards': 5, 'bat': 3,
+    'firecracker': 6, 'rascalboy': 6, 'rascalgirl': 5, 'barbarian': 6,
+    'royalrecruits': 6, 'zappies': 5, 'evofirecracker': 7, 'evoskeleton': 4,
+    'evobomber': 5, 'evobat': 4,
 
     # ── Tier 5: Mini-Tanks & Defensive Ground (Threat 5) ──
     'valk': 5, 'knight': 5, 'icegolem': 5, 'fisherman': 5, 'bowler': 5,
@@ -576,11 +576,17 @@ class TacticalBrain:
 
         # 2. Fallback: Any affordable playable card that respects Anti-Air law
         if best_counter is None:
+            # If a primary counter from counter_list is already in hand,
+            # hold elixir for it instead of burning elixir on an ineffective card!
+            has_counter_in_hand = any(c in hand for c in counter_list)
+            if has_counter_in_hand and elixir < 6.0:
+                return None
+
             for i, c in enumerate(hand):
                 if t_name in FLYING_UNITS and c in GROUND_ONLY_MELEE:
                     continue
-                # For Tanks / Win Conditions, NEVER pick spells as body-blocking pull cards!
-                if t_name in ('giant', 'golem', 'pekka', 'megaknight', 'hog', 'prince', 'ramrider', 'battleram', 'balloon') and c in ('arrows', 'fireball'):
+                # Spells (arrows, fireball) can NEVER body-block or kite single ground units or tanks!
+                if c in ('arrows', 'fireball') and t_name not in ('minions', 'minionhorde', 'bat', 'speargoblin', 'goblin', 'skeleton', 'firecracker'):
                     continue
                 cost = CARD_COSTS.get(c, 3)
                 if elixir >= cost:
@@ -904,7 +910,7 @@ class TacticalBrain:
 
     def has_unresolved_threat(self, game_state):
         """
-        Returns True if an active high-threat enemy (score >= 7) is on our side (y >= 0.26)
+        Returns True if an active high-threat enemy (score >= 8) is approaching the bridge (y >= 0.34)
         and we must hold elixir for the counter rather than allowing the AI to waste it.
         """
         now = time.time()
@@ -914,9 +920,9 @@ class TacticalBrain:
             name = normalize_card_name(e.get('name', ''))
             box = e.get('box', (0, 0, 0, 0))
             cy = (box[1] + box[3]) / 2.0 / cur_h
-            if cy >= 0.26 and THREAT_LEVELS.get(name, 0) >= 7:
+            if cy >= 0.34 and THREAT_LEVELS.get(name, 0) >= 8:
                 return True
-        valid_memory = [t for t in self.active_threat_memory if (now - t['timestamp']) < 4.0 and t.get('score', 0) >= 7 and t.get('y', 0) >= 0.26]
+        valid_memory = [t for t in self.active_threat_memory if (now - t['timestamp']) < 3.5 and t.get('score', 0) >= 8 and t.get('y', 0) >= 0.34]
         return len(valid_memory) > 0
 
     # ── Master Arbiter ────────────────────────────────────────────────
