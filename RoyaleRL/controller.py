@@ -17,6 +17,9 @@ class Controller:
     """Handles all mouse interactions with the game."""
     def __init__(self, scaler):
         self.scaler = scaler
+        # Get the absolute offset of the game window once
+        self.game_area_offset_x = self.scaler.game_area_rect[0]
+        self.game_area_offset_y = self.scaler.game_area_rect[1]
         
         # Find BlueStacks Qt child window for direct PostMessage clicks
         self.target_hwnd = self._find_target_hwnd()
@@ -51,12 +54,29 @@ class Controller:
             return None
 
     def click(self, x, y):
-        """Moves to and clicks a given coordinate using genuine OS mouse input."""
+        """Moves to and clicks a given coordinate."""
+        user32 = ctypes.windll.user32
+        # Use PostMessage directly to the BlueStacks Qt window if available
+        if self.target_hwnd:
+            try:
+                lParam = ((int(y)) << 16) | (int(x) & 0xFFFF)
+                MK_LBUTTON = 0x0001
+                WM_LBUTTONDOWN = 0x0201
+                WM_LBUTTONUP = 0x0202
+                user32.PostMessageW(self.target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam)
+                time.sleep(0.12)
+                user32.PostMessageW(self.target_hwnd, WM_LBUTTONUP, 0, lParam)
+                time.sleep(0.3)
+                return
+            except Exception as e:
+                print(f"PostMessage click failed, falling back to pyautogui: {e}")
+
+        # Convert relative game coordinates to absolute screen coordinates
         abs_x = self.game_area_offset_x + x
         abs_y = self.game_area_offset_y + y
-        pyautogui.moveTo(abs_x, abs_y, duration=0.03)
+        pyautogui.moveTo(abs_x, abs_y, duration=0.1)
         pyautogui.click()
-        time.sleep(0.08)
+        time.sleep(0.5)
 
     def send_escape(self):
         """Sends the Escape key to BlueStacks (acts as Android Back button)."""
@@ -87,21 +107,16 @@ class Controller:
             self.click(int(gw * 0.5), int(gh * 0.75))
             time.sleep(0.5)
 
-
-    @property
-    def game_area_offset_x(self):
-        return self.scaler.game_area_rect[0]
-
-    @property
-    def game_area_offset_y(self):
-        return self.scaler.game_area_rect[1]
-
-    def play_card(self, card_slot_coords, placement_coords, slot=None):
+    def play_card(self, card_slot_coords, placement_coords, *args, **kwargs):
         """
-        Reliably deploys a card using direct two-step tap (Click Card Slot -> Click Arena Tile).
-        No drag-and-drop.
+        Plays a card by clicking its center, then clicking the placement location.
+        This function now ensures the placement is within the defined ARENA_BBOX.
         """
         card_click_x, card_click_y = card_slot_coords
+        print(f"CONTROLLER: Clicking card at relative ({card_click_x}, {card_click_y})")
+        self.click(card_click_x, card_click_y)
+        
+        # ---Bounding Box Clamping Logic ---
         
         # 1. Get the game window's current dimensions
         window_width, window_height = self.scaler.current_resolution
@@ -115,34 +130,14 @@ class Controller:
         # 3. Get the requested placement coordinates
         requested_x, requested_y = placement_coords
 
-        # 4. Clamp the coordinates to ensure they are within the arena bounding box
+        # 4. "Clamp" the coordinates to ensure they are within the bounding box
+        # The max() function ensures the value is not less than the minimum boundary.
+        # The min() function ensures the value is not more than the maximum boundary.
         clamped_x = max(min_x_abs, min(requested_x, max_x_abs))
         clamped_y = max(min_y_abs, min(requested_y, max_y_abs))
-        abs_card_x = self.game_area_offset_x + card_click_x
-        abs_card_y = self.game_area_offset_y + card_click_y
-        abs_target_x = self.game_area_offset_x + clamped_x
-        abs_target_y = self.game_area_offset_y + clamped_y
 
-        slot_label = f" (Slot {slot + 1})" if slot is not None else ""
-        print(f"🎮 [CONTROLLER] Deploying{slot_label}: Tap card ({abs_card_x}, {abs_card_y}) -> Tap arena ({abs_target_x}, {abs_target_y})")
-
-        # Step 0: Optional hotkey selection (1-4) in BlueStacks
-        if slot is not None and 0 <= slot <= 3:
-            try:
-                pyautogui.press(str(slot + 1))
-            except Exception:
-                pass
-
-        # Step 1: Click the card slot to select it
-        pyautogui.moveTo(abs_card_x, abs_card_y, duration=0.03)
-        pyautogui.click()
-        time.sleep(0.08)
-
-        # Step 2: Click the target arena position to deploy the card
-        pyautogui.moveTo(abs_target_x, abs_target_y, duration=0.03)
-        pyautogui.click()
-        time.sleep(0.08)
-
+        print(f"CONTROLLER: Requested placement ({requested_x}, {requested_y}), Clamped to ({clamped_x}, {clamped_y})")
+        self.click(clamped_x, clamped_y)
 
     def find_and_click(self, template_path, confidence=0.70):
 
@@ -154,6 +149,7 @@ class Controller:
         gx2 = max(gx1 + 10, game_area[0] + game_area[2])
         gy2 = max(gy1 + 10, game_area[1] + game_area[3])
         bbox = (gx1, gy1, gx2, gy2)
+
         screenshot_pil = ImageGrab.grab(bbox=bbox)
         screenshot_cv = cv2.cvtColor(np.array(screenshot_pil), cv2.COLOR_RGB2GRAY)
 
