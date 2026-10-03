@@ -132,6 +132,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=64, help="Batch size for training")
     parser.add_argument('--games', type=int, default=0, help="Number of games to run (0 for infinite 24/7)")
     parser.add_argument('--epsilon', type=float, default=None, help="Exploration rate override (e.g. 0.05 for pure AI, 1.0 for random)")
+    parser.add_argument('--no-train', action='store_true', help="Disable automatic post-battle training on match replay steps")
     args = parser.parse_args()
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -230,11 +231,13 @@ def main():
                                 current_game_log['steps'], scaler, vision, battle_duration=battle_duration
                             )
 
-                            if current_game_log['steps']:
+                            if current_game_log['steps'] and not args.no_train:
                                 current_game_log['steps'][-1]['reward'] += final_reward
                                 ai_agent.learn_from_game(current_game_log, scaler=scaler)
                                 ai_agent.train(num_epochs=args.epochs, batch_size=args.batch_size)
                                 ai_agent.update_match_stats(match_result, final_reward)
+                            elif args.no_train:
+                                print("🔒 [SAFEGUARD] Training skipped (--no-train flag active).")
 
                             matches_completed += 1
                             if args.games > 0 and matches_completed >= args.games:
