@@ -261,6 +261,12 @@ class Agent:
         if mandatory_action is not None:
             return mandatory_action
 
+        # Hard-to-refuse Counter Lock: If an active high threat is advancing, HOLD ELIXIR for the counter!
+        # Do not allow the Decision Transformer policy or exploration to squander elixir on offensive cards!
+        if self.tactical_brain.has_unresolved_threat(game_state) and game_state.get('elixir', 0.0) < 9.5:
+            print("⏳ [TACTICAL LOCK] Threat approaching! Holding elixir for mandatory hard-counter...")
+            return None
+
         # 2. Candidate Proposal (Exploration or Decision Transformer Policy)
         if np.random.rand() <= self.epsilon:
             print(f"BRAIN: Choosing candidate action (exploring, ε={self.epsilon:.2f})...")

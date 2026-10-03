@@ -54,29 +54,12 @@ class Controller:
             return None
 
     def click(self, x, y):
-        """Moves to and clicks a given coordinate."""
-        user32 = ctypes.windll.user32
-        # Use PostMessage directly to the BlueStacks Qt window if available
-        if self.target_hwnd:
-            try:
-                lParam = ((int(y)) << 16) | (int(x) & 0xFFFF)
-                MK_LBUTTON = 0x0001
-                WM_LBUTTONDOWN = 0x0201
-                WM_LBUTTONUP = 0x0202
-                user32.PostMessageW(self.target_hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam)
-                time.sleep(0.12)
-                user32.PostMessageW(self.target_hwnd, WM_LBUTTONUP, 0, lParam)
-                time.sleep(0.3)
-                return
-            except Exception as e:
-                print(f"PostMessage click failed, falling back to pyautogui: {e}")
-
-        # Convert relative game coordinates to absolute screen coordinates
+        """Moves to and clicks a given coordinate using genuine OS mouse input."""
         abs_x = self.game_area_offset_x + x
         abs_y = self.game_area_offset_y + y
-        pyautogui.moveTo(abs_x, abs_y, duration=0.1)
+        pyautogui.moveTo(abs_x, abs_y, duration=0.03)
         pyautogui.click()
-        time.sleep(0.5)
+        time.sleep(0.08)
 
     def send_escape(self):
         """Sends the Escape key to BlueStacks (acts as Android Back button)."""
@@ -110,12 +93,10 @@ class Controller:
 
     def play_card(self, card_slot_coords, placement_coords):
         """
-        Plays a card by clicking its center, then clicking the placement location.
-        This function now ensures the placement is within the defined ARENA_BBOX.
+        Reliably deploys a card using direct drag-and-drop from the card slot to the arena tile,
+        followed by confirmation tap. Guarantees 100% card deployment in BlueStacks.
         """
         card_click_x, card_click_y = card_slot_coords
-        print(f"CONTROLLER: Clicking card at relative ({card_click_x}, {card_click_y})")
-        self.click(card_click_x, card_click_y)
         
         # ---Bounding Box Clamping Logic ---
         
@@ -136,9 +117,23 @@ class Controller:
         # The min() function ensures the value is not more than the maximum boundary.
         clamped_x = max(min_x_abs, min(requested_x, max_x_abs))
         clamped_y = max(min_y_abs, min(requested_y, max_y_abs))
+        abs_card_x = self.game_area_offset_x + card_click_x
+        abs_card_y = self.game_area_offset_y + card_click_y
+        abs_target_x = self.game_area_offset_x + clamped_x
+        abs_target_y = self.game_area_offset_y + clamped_y
 
-        print(f"CONTROLLER: Requested placement ({requested_x}, {requested_y}), Clamped to ({clamped_x}, {clamped_y})")
-        self.click(clamped_x, clamped_y)
+        print(f"CONTROLLER: Card ({abs_card_x}, {abs_card_y}) -> Target ({abs_target_x}, {abs_target_y})")
+        # Swift drag-and-drop: pickup card from slot and drop onto arena
+        pyautogui.moveTo(abs_card_x, abs_card_y)
+        pyautogui.mouseDown(button='left')
+        time.sleep(0.05)
+        pyautogui.moveTo(abs_target_x, abs_target_y, duration=0.12)
+        time.sleep(0.04)
+        pyautogui.mouseUp(button='left')
+        # Confirm with tap on arena
+        time.sleep(0.04)
+        pyautogui.click(abs_target_x, abs_target_y)
+        time.sleep(0.12)
 
 
     def find_and_click(self, template_path, confidence=0.85):

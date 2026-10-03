@@ -24,6 +24,7 @@ Strict Rules Enforced (Zero-Tolerance Policy):
 =================================================================
 """
 
+import re
 import time
 import numpy as np
 import config
@@ -183,75 +184,88 @@ def normalize_card_name(name):
     if not name:
         return ''
     n = str(name).lower().strip().replace('_', '').replace('-', '').replace(' ', '')
-    if 'minipekka' in n:
+    n_dedup = re.sub(r'([a-z])\1+', r'\1', n)
+
+    def match(pattern):
+        return pattern in n or pattern in n_dedup
+
+    if match('minipekka'):
         return 'mini-pekka'
-    if 'megaknight' in n:
+    if match('megaknight'):
         return 'megaknight'
-    if 'pekka' in n:
+    if match('pekka'):
         return 'pekka'
-    if 'queen' in n:
+    if match('queen'):
         return 'queen'
-    if 'mightyminer' in n:
+    if match('mightyminer'):
         return 'mightyminer'
-    if 'miner' in n:
+    if match('miner'):
         return 'miner'
-    if 'valk' in n:
+    if match('valk'):
         return 'valk'
-    if 'speargoblin' in n:
+    if match('spear'):
         return 'speargoblin'
-    if 'goblinbarrel' in n:
+    if match('goblinbarrel'):
         return 'goblinbarrel'
-    if 'goblincage' in n:
+    if match('goblincage'):
         return 'goblin_cage'
-    if 'goblinhut' in n:
+    if match('goblinhut'):
         return 'goblin_hut'
-    if 'goblindrill' in n:
+    if match('goblindrill'):
         return 'goblindrill'
-    if 'goblingiant' in n:
+    if match('goblingiant'):
         return 'goblingiant'
-    if 'goblin' in n:
+    if match('goblin'):
         return 'goblin'
-    if 'hog' in n or 'pig' in n:
+    if match('hog') or match('pig'):
         return 'hog'
-    if 'balloon' in n:
+    if match('balloon'):
         return 'balloon'
-    if 'minion' in n:
+    if match('minion'):
         return 'minions'
-    if 'archer' in n and 'magic' not in n and 'queen' not in n:
+    if match('archer') and not match('magic') and not match('queen'):
         return 'archers'
-    if 'giant' in n and 'skeleton' not in n:
+    if match('giant') and not match('skel'):
         return 'giant'
-    if 'knight' in n and 'golden' not in n and 'mega' not in n:
+    if match('knight') and not match('golden') and not match('mega'):
         return 'knight'
-    if 'musk' in n:
+    if match('musk'):
         return 'musketeer'
-    if 'fireball' in n:
+    if match('fireball'):
         return 'fireball'
-    if 'arrow' in n:
+    if match('arrow'):
         return 'arrows'
-    if 'skeletonbarrel' in n:
-        return 'skeletonbarrel'
-    if 'skeleton' in n:
+    if match('skel'):
+        if match('barrel'):
+            return 'skeletonbarrel'
+        if match('giant'):
+            return 'giantskeleton'
+        if match('king'):
+            return 'skellyking'
         return 'skeleton'
-    if 'firecracker' in n:
+    if match('rascal'):
+        if match('girl'):
+            return 'rascalgirl'
+        return 'rascalboy'
+    if match('firecracker'):
         return 'firecracker'
-    if 'wizard' in n:
+    if match('wizard'):
         return 'wizard'
-    if 'witch' in n:
+    if match('witch'):
         return 'witch'
-    if 'prince' in n and 'dark' not in n:
+    if match('prince') and not match('dark'):
         return 'prince'
-    if 'darkprince' in n:
+    if match('darkprince'):
         return 'darkprince'
-    if 'ebarbs' in n:
+    if match('ebarbs'):
         return 'ebarbs'
-    if 'sparky' in n:
+    if match('sparky'):
         return 'sparky'
-    if 'wallbreaker' in n:
+    if match('wallbreaker'):
         return 'wallbreakers'
-    if 'ramrider' in n:
+    if match('ramrider'):
         return 'ramrider'
-    if 'battleram' in n:
+    if match('battleram'):
         return 'battleram'
     return n
 
@@ -479,7 +493,7 @@ class TacticalBrain:
             center_y = (box[1] + box[3]) / 2.0 / cur_h
 
             # Approaching bridge or on our side of the arena
-            if center_y >= 0.36:
+            if center_y >= 0.26:
                 threat_score = THREAT_LEVELS.get(name, 2)
                 if threat_score >= 3:
                     threat_lane = 'left' if center_x < 0.50 else 'right'
@@ -538,11 +552,11 @@ class TacticalBrain:
         if not self.active_threat_memory:
             return None
 
-        # Sort threats by severity
-        self.active_threat_memory.sort(key=lambda t: t['score'], reverse=True)
+        # Sort threats by severity + proximity to our towers
+        self.active_threat_memory.sort(key=lambda t: (t['score'] * 10.0 + t['y'] * 15.0), reverse=True)
         top_threat = self.active_threat_memory[0]
         t_name = top_threat['name']
-        threat_lane = top_threat['lane']
+        threat_lane = 'left' if top_threat['x'] < 0.50 else 'right'
         t_box = top_threat['box']
         self.active_push_lane = threat_lane
 
@@ -564,6 +578,9 @@ class TacticalBrain:
         if best_counter is None:
             for i, c in enumerate(hand):
                 if t_name in FLYING_UNITS and c in GROUND_ONLY_MELEE:
+                    continue
+                # For Tanks / Win Conditions, NEVER pick spells as body-blocking pull cards!
+                if t_name in ('giant', 'golem', 'pekka', 'megaknight', 'hog', 'prince', 'ramrider', 'battleram', 'balloon') and c in ('arrows', 'fireball'):
                     continue
                 cost = CARD_COSTS.get(c, 3)
                 if elixir >= cost:
@@ -596,13 +613,20 @@ class TacticalBrain:
             print(f"🛡️ [TOWER INTERCEPT] Deploying {best_counter.upper()} directly onto {t_name.upper()} at ({t_px_x}, {t_px_y})!")
             return {'action': 'play_card', 'card_slot': counter_slot, 'position': (t_px_x, t_px_y), 'tactical_rule': 'TOWER_INTERCEPT'}
 
-        # C. Single-Target Melee / Tanks / Win Conditions: Center-Pull Kiting
+        # C. Single-Target Melee / Tanks / Win Conditions: Center-Pull Kiting vs Direct Intercept
         if t_name in ('giant', 'mini-pekka', 'knight', 'hog', 'balloon', 'pekka', 'megaknight', 'prince', 'darkprince', 'ebarbs', 'ramrider', 'golem', 'egiant', 'royalgiant'):
-            plant_x_pct = 0.47 if threat_lane == 'left' else 0.53
-            plant_y_pct = 0.63
-            deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
-            print(f"🛡️ [CENTER PULL] Playing {best_counter.upper()} at Center Kiting Zone ({plant_x_pct:.2f}, {plant_y_pct:.2f}) vs {t_name.upper()}!")
-            return {'action': 'play_card', 'card_slot': counter_slot, 'position': deploy_pos, 'tactical_rule': 'CENTER_PULL_DEFENSE'}
+            if top_threat['y'] >= 0.65:
+                # Danger zone! Threat is directly assaulting friendly Princess Tower -> drop counter right on top!
+                t_px_x = int((t_box[0] + t_box[2]) / 2)
+                t_px_y = int((t_box[1] + t_box[3]) / 2)
+                print(f"🛡️ [CLOSE DEFENSE] Deploying {best_counter.upper()} directly onto {t_name.upper()} at ({t_px_x}, {t_px_y})!")
+                return {'action': 'play_card', 'card_slot': counter_slot, 'position': (t_px_x, t_px_y), 'tactical_rule': 'TOWER_INTERCEPT'}
+            else:
+                plant_x_pct = 0.47 if threat_lane == 'left' else 0.53
+                plant_y_pct = 0.63
+                deploy_pos = self._to_pixels(plant_x_pct, plant_y_pct)
+                print(f"🛡️ [CENTER PULL] Playing {best_counter.upper()} at Center Kiting Zone ({plant_x_pct:.2f}, {plant_y_pct:.2f}) vs {t_name.upper()}!")
+                return {'action': 'play_card', 'card_slot': counter_slot, 'position': deploy_pos, 'tactical_rule': 'CENTER_PULL_DEFENSE'}
 
         # D. Ranged Attackers & Champions (Musketeer, Queen, Wizard, Witch, etc.): Drop melee directly on top
         if t_name in ('musketeer', 'queen', 'wizard', 'witch', 'marcher', 'dartgoblin', 'executioner', 'littleprince', 'princess') and best_counter in ('knight', 'mini-pekka'):
@@ -758,7 +782,7 @@ class TacticalBrain:
             box = e.get('box', (0, 0, 0, 0))
             center_x = (box[0] + box[2]) / 2.0 / cur_w
             center_y = (box[1] + box[3]) / 2.0 / cur_h
-            if center_y >= 0.36:
+            if center_y >= 0.26:
                 threat_score = THREAT_LEVELS.get(name, 2)
                 if threat_score >= 3:
                     t_lane = 'left' if center_x < 0.50 else 'right'
@@ -781,7 +805,7 @@ class TacticalBrain:
             has_air_threat = any(
                 normalize_card_name(e.get('name')) in FLYING_UNITS
                 for e in enemies
-                if (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h >= 0.36
+                if (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h >= 0.26
             ) or any(t['name'] in FLYING_UNITS for t in self.active_threat_memory)
             if has_air_threat:
                 print(f"⛔ [RULE OVERRIDE] Blocked {card_name.upper()} deployment against Air Threat (Ground melee cannot hit air!).")
@@ -864,7 +888,7 @@ class TacticalBrain:
         if not threat_lane:
             for e in enemies:
                 ey = (e.get('box', (0, 0, 0, 0))[1] + e.get('box', (0, 0, 0, 0))[3]) / 2.0 / cur_h
-                if ey >= 0.36:
+                if ey >= 0.26:
                     ex = (e.get('box', (0, 0, 0, 0))[0] + e.get('box', (0, 0, 0, 0))[2]) / 2.0 / cur_w
                     threat_lane = 'left' if ex < 0.50 else 'right'
                     break
@@ -877,6 +901,23 @@ class TacticalBrain:
                 return {'action': 'play_card', 'card_slot': slot, 'position': (adjusted_x, pos[1]), 'tactical_rule': 'LANE_ADAPTATION'}
 
         return action
+
+    def has_unresolved_threat(self, game_state):
+        """
+        Returns True if an active high-threat enemy (score >= 7) is on our side (y >= 0.26)
+        and we must hold elixir for the counter rather than allowing the AI to waste it.
+        """
+        now = time.time()
+        cur_w, cur_h = self._get_res()
+        enemies = game_state.get('enemies', [])
+        for e in enemies:
+            name = normalize_card_name(e.get('name', ''))
+            box = e.get('box', (0, 0, 0, 0))
+            cy = (box[1] + box[3]) / 2.0 / cur_h
+            if cy >= 0.26 and THREAT_LEVELS.get(name, 0) >= 7:
+                return True
+        valid_memory = [t for t in self.active_threat_memory if (now - t['timestamp']) < 4.0 and t.get('score', 0) >= 7 and t.get('y', 0) >= 0.26]
+        return len(valid_memory) > 0
 
     # ── Master Arbiter ────────────────────────────────────────────────
     def arbitrate_decision(self, game_state, dt_action=None):

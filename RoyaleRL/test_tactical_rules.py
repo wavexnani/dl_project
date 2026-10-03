@@ -748,6 +748,49 @@ class TestTacticalRules(unittest.TestCase):
         print("  [PASS] Rule 26: Sentinel Defense on Opposite Lane during breach push verified.")
 
 
+    # =================================================================
+    # RULE 27: Tactical Elixir Lock & Hard-to-Refuse Complement Counter
+    # =================================================================
+    def test_rule27_unresolved_threat_locks_elixir_until_counter_affordable(self):
+        """Rule 27: If a Giant is approaching and we need 4 elixir for Mini-Pekka, agent must hold elixir instead of wasting it on AI candidate actions."""
+        game_state = {
+            'hand': ['mini-pekka', 'knight', 'arrows', 'musketeer'],
+            'elixir': 2.5,  # Not enough for Mini-Pekka yet
+            'ocr_data': {'ptl': '2000', 'ptr': '2000'},
+            'enemies': [{
+                'name': 'giant',
+                'confidence': 0.88,
+                'box': (120, 320, 180, 400)  # y ~ 360/1007 = 0.36
+            }]
+        }
+        # Step A: At 2.5 elixir, tactical brain recognizes unresolved threat
+        self.assertTrue(self.brain.has_unresolved_threat(game_state), "Brain must detect unresolved Giant threat!")
+        
+        # Step B: Agent decide_action must return None (holding elixir) instead of firing DT/exploration candidate
+        action = self.agent.decide_action(game_state, self.scaler)
+        self.assertIsNone(action, "Agent MUST hold elixir (return None) when threat is approaching and counter is not yet affordable!")
+
+        # Step C: Once elixir reaches 4.0, mandatory action fires Mini-Pekka counter immediately!
+        game_state['elixir'] = 4.0
+        action = self.agent.decide_action(game_state, self.scaler)
+        self.assertIsNotNone(action, "Agent must immediately deploy hard-counter once elixir is reached!")
+        self.assertEqual(action.get('card_slot'), 0)  # Mini-Pekka
+        self.assertEqual(action.get('tactical_rule'), 'CENTER_PULL_DEFENSE')
+        print("  [PASS] Rule 27A: Tactical Lock successfully held elixir and deployed hard-counter upon reaching cost.")
+
+    def test_rule27_resilient_card_name_normalization(self):
+        """Rule 27: normalize_card_name handles noisy detector labels and duplicate characters."""
+        from tactical_brain import normalize_card_name
+        self.assertEqual(normalize_card_name('SSpeargoblin'), 'speargoblin')
+        self.assertEqual(normalize_card_name('Speaargoblin'), 'speargoblin')
+        self.assertEqual(normalize_card_name('Skelleton'), 'skeleton')
+        self.assertEqual(normalize_card_name('Skeleeton'), 'skeleton')
+        self.assertEqual(normalize_card_name('Rascalgirl'), 'rascalgirl')
+        self.assertEqual(normalize_card_name('Mightyminer'), 'mightyminer')
+        self.assertEqual(normalize_card_name('Skeletonbarrel'), 'skeletonbarrel')
+        print("  [PASS] Rule 27B: Resilient card name normalization verified.")
+
+
 if __name__ == '__main__':
     print(f"\n{'='*70}")
     print("  RUNNING CLASH ROYALE TACTICAL RULES & ZERO-TOLERANCE TEST SUITE")

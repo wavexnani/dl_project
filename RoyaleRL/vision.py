@@ -64,7 +64,11 @@ class EnemyDetector:
                 })
 
         if detected_units:
-            unit_strs = [f"{u['name']}({u['confidence']:.2f}, y={u['box'][1]})" for u in detected_units]
+            img_w = frame_rgb.shape[1] if len(frame_rgb.shape) > 1 else 586
+            unit_strs = [
+                f"{u['name']}(conf={u['confidence']:.2f}, lane={'L' if (u['box'][0] + u['box'][2]) / 2 < img_w / 2 else 'R'}, pos=({int((u['box'][0] + u['box'][2]) / 2)}, {int((u['box'][1] + u['box'][3]) / 2)}))"
+                for u in detected_units
+            ]
             print(f"👁️ [VISION] Detected enemies: {', '.join(unit_strs)}")
 
         return detected_units
