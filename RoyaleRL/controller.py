@@ -17,9 +17,6 @@ class Controller:
     """Handles all mouse interactions with the game."""
     def __init__(self, scaler):
         self.scaler = scaler
-        # Get the absolute offset of the game window once
-        self.game_area_offset_x = self.scaler.game_area_rect[0]
-        self.game_area_offset_y = self.scaler.game_area_rect[1]
         
         # Find BlueStacks Qt child window for direct PostMessage clicks
         self.target_hwnd = self._find_target_hwnd()
