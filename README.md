@@ -16,55 +16,46 @@ An advanced, production-grade autonomous agent and training pipeline for **Clash
 
 ```mermaid
 graph TD
-    %% Professional Slate & Accent Theme
-    classDef input fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
-    classDef model fill:#1e293b,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc;
-    classDef synth fill:#1e293b,stroke:#34d399,stroke-width:1.5px,color:#f8fafc;
-    classDef brain fill:#1e293b,stroke:#a78bfa,stroke-width:1.5px,color:#f8fafc;
-    classDef rule fill:#1e293b,stroke:#fbbf24,stroke-width:1.5px,color:#f8fafc;
-    classDef action fill:#1e293b,stroke:#22d3ee,stroke-width:1.5px,color:#f8fafc;
-    classDef training fill:#1e293b,stroke:#94a3b8,stroke-width:1.5px,color:#f8fafc;
-
     subgraph S1["1. Perception Pipeline (Every Frame in RAM)"]
-        BS["BlueStacks Game Screen (565x1007)"]:::input --> GRAB["ImageGrab.grab() (In-Memory PIL Frame)"]:::input
-        GRAB --> CROP["Card Slot Cropper"]:::input
-        GRAB --> FULL["Full Arena Frame (640x640)"]:::input
-        GRAB --> OCR["Tower & Clock ROIs"]:::input
-        GRAB --> ELX["Elixir Crop ROI"]:::input
+        BS["BlueStacks Game Screen (565x1007)"] --> GRAB["ImageGrab.grab() (In-Memory PIL Frame)"]
+        GRAB --> CROP["Card Slot Cropper"]
+        GRAB --> FULL["Full Arena Frame (640x640)"]
+        GRAB --> OCR["Tower & Clock ROIs"]
+        GRAB --> ELX["Elixir Crop ROI"]
         
-        CROP --> M1["Model 1: MobileNetV2\n(Card Classifier)"]:::model
-        FULL --> M2["Model 2: YOLOv9-c\n(Enemy Detector)"]:::model
-        OCR --> M_OCR["EasyOCR Engine\n(Tower Health)"]:::model
-        ELX --> M_ELX["Template Matching\n(Elixir Gauge)"]:::model
+        CROP --> M1["Model 1: MobileNetV2\n(Card Classifier)"]
+        FULL --> M2["Model 2: YOLOv9-c\n(Enemy Detector)"]
+        OCR --> M_OCR["EasyOCR Engine\n(Tower Health)"]
+        ELX --> M_ELX["Template Matching\n(Elixir Gauge)"]
         
-        M1 -->|"4 Cards: ['giant', ...]"| STATE["State Assembler\n(_flatten_state in agent.py)"]:::synth
+        M1 -->|"4 Cards: ['giant', ...]"| STATE["State Assembler\n(_flatten_state in agent.py)"]
         M2 -->|"20 Troop BBoxes: [x1,y1,x2,y2]"| STATE
         M_OCR -->|"6 Tower HP Deltas"| STATE
         M_ELX -->|"Elixir Value (0-10)"| STATE
     end
 
     subgraph S2["2. Mathematical Representation"]
-        STATE --> VEC["Unified State Vector s_t\n(Length: 439 Floats)"]:::synth
-        VEC --> HIST["Trajectory Sequence Queue\n(Context Window K = 10)"]:::synth
+        STATE --> VEC["Unified State Vector s_t\n(Length: 439 Floats)"]
+        VEC --> HIST["Trajectory Sequence Queue\n(Context Window K = 10)"]
     end
 
     subgraph S3["3. Neuro-Symbolic Decision Engine"]
-        HIST --> DT["Model 3: Decision Transformer\n(Conditioned on Target Return R = +2.0)"]:::brain
-        DT --> CAND["Action Candidate Proposals\n(Card Slot + 18x30 Grid)"]:::brain
+        HIST --> DT["Model 3: Decision Transformer\n(Conditioned on Target Return R = +2.0)"]
+        DT --> CAND["Action Candidate Proposals\n(Card Slot + 18x30 Grid)"]
         
-        CAND --> TB{"TacticalBrain Filter\n(Symbolic Rules)"}:::rule
-        TB -->|"Passes: Anti-Air, Center-Pull, King Safe"| EXEC["Validated Action: (slot, x, y)"]:::action
-        TB -->|"Fails Tactical Check"| NEXT_CAND["Evaluate Next Candidate"]:::rule
+        CAND --> TB{"TacticalBrain Filter\n(Symbolic Rules)"}
+        TB -->|"Passes: Anti-Air, Center-Pull, King Safe"| EXEC["Validated Action: (slot, x, y)"]
+        TB -->|"Fails Tactical Check"| NEXT_CAND["Evaluate Next Candidate"]
         NEXT_CAND --> TB
-        TB -->|"All Rejected & Elixir >= 9"| RELIEF["Elixir Relief Valve\n(Drop Tank behind King)"]:::rule
+        TB -->|"All Rejected & Elixir >= 9"| RELIEF["Elixir Relief Valve\n(Drop Tank behind King)"]
         RELIEF --> EXEC
     end
 
     subgraph S4["4. Execution & Continuous Learning"]
-        EXEC --> POST["Win32 PostMessage API\n(No Cursor Hijacking)"]:::action
+        EXEC --> POST["Win32 PostMessage API\n(No Cursor Hijacking)"]
         POST --> BS
-        EXEC --> BUFF["Replay Buffer (RAM / replay_buffer.pkl)\n(s_t, a_t, r_t, s_t+1)"]:::training
-        BUFF --> TRAIN["Reward-Weighted\nGradient Update (Loss)"]:::training
+        EXEC --> BUFF["Replay Buffer (RAM / replay_buffer.pkl)\n(s_t, a_t, r_t, s_t+1)"]
+        BUFF --> TRAIN["Reward-Weighted\nGradient Update (Loss)"]
     end
 ```
 
@@ -72,65 +63,56 @@ graph TD
 
 ```mermaid
 flowchart TD
-    %% Professional Slate & Accent Theme
-    classDef capture fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
-    classDef vision fill:#1e293b,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc;
-    classDef synth fill:#1e293b,stroke:#34d399,stroke-width:1.5px,color:#f8fafc;
-    classDef brain fill:#1e293b,stroke:#fbbf24,stroke-width:1.5px,color:#f8fafc;
-    classDef model fill:#1e293b,stroke:#a78bfa,stroke-width:1.5px,color:#f8fafc;
-    classDef action fill:#1e293b,stroke:#22d3ee,stroke-width:1.5px,color:#f8fafc;
-    classDef training fill:#1e293b,stroke:#94a3b8,stroke-width:1.5px,color:#f8fafc;
-
     subgraph Loop["1. Real-Time Tick Loop (runbot.py ~350ms cycle)"]
-        A["Screen Capture (ImageGrab)<br/>Resolution Scaled via Scaler"]:::capture
-        GS["GameStateManager.get_state()<br/>MatchTemplate on Anchors"]:::capture
+        A["Screen Capture (ImageGrab)<br/>Resolution Scaled via Scaler"]
+        GS["GameStateManager.get_state()<br/>MatchTemplate on Anchors"]
     end
 
     subgraph Perception["2. Vision & State Extraction (core/vision.py)"]
-        B["Vision.get_game_state()"]:::vision
+        B["Vision.get_game_state()"]
         
-        B1["<b>MobileNetV2 Classifier</b><br/>Input: 4 cropped card slots (128x128)<br/>Output: Active Hand Cards"]:::vision
-        B2["<b>YOLOv9 Detector</b><br/>Input: Arena RGB frame (640x640)<br/>Output: Enemy Bounding Boxes & Names"]:::vision
-        B3["<b>EasyOCR Reader</b><br/>Input: 6 Tower HP regions + Timer<br/>Output: Digits & Health Percentages"]:::vision
-        B4["<b>Elixir Tracker & Vision</b><br/>Tick Accrual + CV2 Template Sync<br/>Output: Float Elixir [0.0 - 10.0]"]:::vision
+        B1["<b>MobileNetV2 Classifier</b><br/>Input: 4 cropped card slots (128x128)<br/>Output: Active Hand Cards"]
+        B2["<b>YOLOv9 Detector</b><br/>Input: Arena RGB frame (640x640)<br/>Output: Enemy Bounding Boxes & Names"]
+        B3["<b>EasyOCR Reader</b><br/>Input: 6 Tower HP regions + Timer<br/>Output: Digits & Health Percentages"]
+        B4["<b>Elixir Tracker & Vision</b><br/>Tick Accrual + CV2 Template Sync<br/>Output: Float Elixir [0.0 - 10.0]"]
     end
 
     subgraph StateSynth["3. State Vector Synthesis (core/agent.py)"]
-        S["Flatten State (439-Dim Vector)<br/>• Elixir (1)<br/>• 6 Towers HP% (6)<br/>• Hand One-Hot (4 x 88 = 352)<br/>• Top 20 Enemy BBoxes (80)"]:::synth
+        S["Flatten State (439-Dim Vector)<br/>• Elixir (1)<br/>• 6 Towers HP% (6)<br/>• Hand One-Hot (4 x 88 = 352)<br/>• Top 20 Enemy BBoxes (80)"]
     end
 
     subgraph Arbiter["4. Neuro-Symbolic Decision Engine (core/agent.py & tactical_brain.py)"]
-        TB_Mandatory{"TacticalBrain.get_mandatory_action()<br/>Any Critical Threat or Lethal Win?"}:::brain
+        TB_Mandatory{"TacticalBrain.get_mandatory_action()<br/>Any Critical Threat or Lethal Win?"}
         
-        M_Spell["Rule 1: Spell-Snipe Finisher<br/>(Tower HP <= 280 / 140)"]:::brain
-        M_Threat["Rule 3 & 14: Emergency Threat Defense<br/>(Center-Pull Kiting vs Approaching Push)"]:::brain
-        M_Pocket["Rule 10: Pocket King Assault<br/>(Enemy Princess Tower Down)"]:::brain
-        M_Leak["Rule 7: 10-Elixir Leak Prevention<br/>(Cycle Card Behind King)"]:::brain
+        M_Spell["Rule 1: Spell-Snipe Finisher<br/>(Tower HP <= 280 / 140)"]
+        M_Threat["Rule 3 & 14: Emergency Threat Defense<br/>(Center-Pull Kiting vs Approaching Push)"]
+        M_Pocket["Rule 10: Pocket King Assault<br/>(Enemy Princess Tower Down)"]
+        M_Leak["Rule 7: 10-Elixir Leak Prevention<br/>(Cycle Card Behind King)"]
         
-        TacticalLock{"TacticalBrain.has_unresolved_threat()<br/>High Threat Approaching?"}:::brain
-        HoldElixir["HOLD ELIXIR<br/>Do not squander elixir on attack"]:::brain
+        TacticalLock{"TacticalBrain.has_unresolved_threat()<br/>High Threat Approaching?"}
+        HoldElixir["HOLD ELIXIR<br/>Do not squander elixir on attack"]
 
-        Epsilon{"Random < Epsilon?<br/>(Exploration vs Exploitation)"}:::brain
+        Epsilon{"Random < Epsilon?<br/>(Exploration vs Exploitation)"}
         
-        RandAction["Sample Random Playable Card & Grid"]:::brain
+        RandAction["Sample Random Playable Card & Grid"]
         
-        DT_Inference["<b>Decision Transformer Model</b><br/>Input: State (439d), Last Action, Target Return (+2.0), Step<br/>Output: 48,060 Action Logits<br/>(Masked to Playable Cards in Hand)"]:::model
+        DT_Inference["<b>Decision Transformer Model</b><br/>Input: State (439d), Last Action, Target Return (+2.0), Step<br/>Output: 48,060 Action Logits<br/>(Masked to Playable Cards in Hand)"]
         
-        Validate{"TacticalBrain.validate_candidate_action()<br/>Check Negative Constraints:<br/>• Wake King early?<br/>• Ground melee vs Air?<br/>• Naked bridge giant?<br/>• Attack during defense?"}:::brain
+        Validate{"TacticalBrain.validate_candidate_action()<br/>Check Negative Constraints:<br/>• Wake King early?<br/>• Ground melee vs Air?<br/>• Naked bridge giant?<br/>• Attack during defense?"}
         
-        CorrectAction["Corrected / Shifted Action<br/>(e.g., Safe Pullback, Lane Shift)"]:::brain
-        RejectAction["Reject Action (None)"]:::brain
-        ReliefValve["Elixir Relief Valve (Elixir >= 9.0)"]:::brain
+        CorrectAction["Corrected / Shifted Action<br/>(e.g., Safe Pullback, Lane Shift)"]
+        RejectAction["Reject Action (None)"]
+        ReliefValve["Elixir Relief Valve (Elixir >= 9.0)"]
     end
 
     subgraph Execution["5. Motor Output & Driver (drivers/controller.py)"]
-        EXEC["Controller.play_card()<br/>1. Click Card Slot<br/>2. Click Placement Grid Coordinate"]:::action
-        DEDUCT["ElixirTracker.deduct(cost)<br/>Instant Elixir Deduction"]:::action
+        EXEC["Controller.play_card()<br/>1. Click Card Slot<br/>2. Click Placement Grid Coordinate"]
+        DEDUCT["ElixirTracker.deduct(cost)<br/>Instant Elixir Deduction"]
     end
 
     subgraph PostMatch["6. Replay Buffer & Training (core/agent.py)"]
-        BUFF["ReplayBuffer.add(s, a, r, s')<br/>Experience Logging"]:::training
-        TRAIN["Decision Transformer Training<br/>Reward-Weighted Cross-Entropy<br/>weights = clamp(1 + r, 0.2, 3.0)"]:::training
+        BUFF["ReplayBuffer.add(s, a, r, s')<br/>Experience Logging"]
+        TRAIN["Decision Transformer Training<br/>Reward-Weighted Cross-Entropy<br/>weights = clamp(1 + r, 0.2, 3.0)"]
     end
 
     %% Wiring
