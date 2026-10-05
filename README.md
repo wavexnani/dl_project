@@ -16,46 +16,55 @@ An advanced, production-grade autonomous agent and training pipeline for **Clash
 
 ```mermaid
 graph TD
-    subgraph S1["Perception Pipeline (Every Frame in RAM)"]
-        BS["BlueStacks Game Screen (565x1007)"] --> GRAB["ImageGrab.grab() (In-Memory PIL Frame)"]
-        GRAB --> CROP["Card Slot Cropper"]
-        GRAB --> FULL["Full Arena Frame (640x640)"]
-        GRAB --> OCR["Tower & Clock ROIs"]
-        GRAB --> ELX["Elixir Crop ROI"]
+    %% Professional Slate & Accent Theme
+    classDef input fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
+    classDef model fill:#1e293b,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc;
+    classDef synth fill:#1e293b,stroke:#34d399,stroke-width:1.5px,color:#f8fafc;
+    classDef brain fill:#1e293b,stroke:#a78bfa,stroke-width:1.5px,color:#f8fafc;
+    classDef rule fill:#1e293b,stroke:#fbbf24,stroke-width:1.5px,color:#f8fafc;
+    classDef action fill:#1e293b,stroke:#22d3ee,stroke-width:1.5px,color:#f8fafc;
+    classDef training fill:#1e293b,stroke:#94a3b8,stroke-width:1.5px,color:#f8fafc;
+
+    subgraph S1["1. Perception Pipeline (Every Frame in RAM)"]
+        BS["BlueStacks Game Screen (565x1007)"]:::input --> GRAB["ImageGrab.grab() (In-Memory PIL Frame)"]:::input
+        GRAB --> CROP["Card Slot Cropper"]:::input
+        GRAB --> FULL["Full Arena Frame (640x640)"]:::input
+        GRAB --> OCR["Tower & Clock ROIs"]:::input
+        GRAB --> ELX["Elixir Crop ROI"]:::input
         
-        CROP --> M1["Model 1: MobileNetV2\n(Card Classifier)"]
-        FULL --> M2["Model 2: YOLOv9-c\n(Enemy Detector)"]
-        OCR --> M_OCR["EasyOCR Engine"]
-        ELX --> M_ELX["Template Matching\n(OpenCV)"]
+        CROP --> M1["Model 1: MobileNetV2\n(Card Classifier)"]:::model
+        FULL --> M2["Model 2: YOLOv9-c\n(Enemy Detector)"]:::model
+        OCR --> M_OCR["EasyOCR Engine\n(Tower Health)"]:::model
+        ELX --> M_ELX["Template Matching\n(Elixir Gauge)"]:::model
         
-        M1 -->|"4 Cards: ['giant', ...]"| STATE["State Assembler\n(_flatten_state in agent.py)"]
+        M1 -->|"4 Cards: ['giant', ...]"| STATE["State Assembler\n(_flatten_state in agent.py)"]:::synth
         M2 -->|"20 Troop BBoxes: [x1,y1,x2,y2]"| STATE
         M_OCR -->|"6 Tower HP Deltas"| STATE
         M_ELX -->|"Elixir Value (0-10)"| STATE
     end
 
-    subgraph S2["Mathematical Representation"]
-        STATE --> VEC["Unified State Vector s_t\n(Length: 439 Floats)"]
-        VEC --> HIST["Trajectory Sequence Queue\n(Context Window K = 10)"]
+    subgraph S2["2. Mathematical Representation"]
+        STATE --> VEC["Unified State Vector s_t\n(Length: 439 Floats)"]:::synth
+        VEC --> HIST["Trajectory Sequence Queue\n(Context Window K = 10)"]:::synth
     end
 
-    subgraph S3["Neuro-Symbolic Decision Engine"]
-        HIST --> DT["Model 3: Decision Transformer\n(Conditioned on Target Return R = +2.0)"]
-        DT --> CAND["Action Candidate Proposals\n(Card Slot + 18x30 Grid)"]
+    subgraph S3["3. Neuro-Symbolic Decision Engine"]
+        HIST --> DT["Model 3: Decision Transformer\n(Conditioned on Target Return R = +2.0)"]:::brain
+        DT --> CAND["Action Candidate Proposals\n(Card Slot + 18x30 Grid)"]:::brain
         
-        CAND --> TB{"TacticalBrain Filter\n(Symbolic Rules)"}
-        TB -->|"Passes: Anti-Air, Center-Pull, King Safe"| EXEC["Validated Action: (slot, x, y)"]
-        TB -->|"Fails Tactical Check"| NEXT_CAND["Evaluate Next Candidate"]
+        CAND --> TB{"TacticalBrain Filter\n(Symbolic Rules)"}:::rule
+        TB -->|"Passes: Anti-Air, Center-Pull, King Safe"| EXEC["Validated Action: (slot, x, y)"]:::action
+        TB -->|"Fails Tactical Check"| NEXT_CAND["Evaluate Next Candidate"]:::rule
         NEXT_CAND --> TB
-        TB -->|"All Rejected & Elixir >= 9"| RELIEF["Elixir Relief Valve\n(Drop Tank behind King)"]
+        TB -->|"All Rejected & Elixir >= 9"| RELIEF["Elixir Relief Valve\n(Drop Tank behind King)"]:::rule
         RELIEF --> EXEC
     end
 
-    subgraph S4["Execution & Learning"]
-        EXEC --> POST["Win32 PostMessage API\n(No Cursor Hijacking)"]
+    subgraph S4["4. Execution & Continuous Learning"]
+        EXEC --> POST["Win32 PostMessage API\n(No Cursor Hijacking)"]:::action
         POST --> BS
-        EXEC --> BUFF["Replay Buffer (RAM / replay_buffer.pkl)\n(s_t, a_t, r_t, s_t+1)"]
-        BUFF --> TRAIN["Reward-Weighted\nGradient Update (Loss)"]
+        EXEC --> BUFF["Replay Buffer (RAM / replay_buffer.pkl)\n(s_t, a_t, r_t, s_t+1)"]:::training
+        BUFF --> TRAIN["Reward-Weighted\nGradient Update (Loss)"]:::training
     end
 ```
 
@@ -63,13 +72,14 @@ graph TD
 
 ```mermaid
 flowchart TD
-    %% Styling & Theme
-    classDef capture fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
-    classDef vision fill:#0f172a,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
-    classDef brain fill:#1e1b4b,stroke:#c084fc,stroke-width:2px,color:#f8fafc;
-    classDef model fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc;
-    classDef action fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc;
-    classDef training fill:#451a03,stroke:#fb923c,stroke-width:2px,color:#f8fafc;
+    %% Professional Slate & Accent Theme
+    classDef capture fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
+    classDef vision fill:#1e293b,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc;
+    classDef synth fill:#1e293b,stroke:#34d399,stroke-width:1.5px,color:#f8fafc;
+    classDef brain fill:#1e293b,stroke:#fbbf24,stroke-width:1.5px,color:#f8fafc;
+    classDef model fill:#1e293b,stroke:#a78bfa,stroke-width:1.5px,color:#f8fafc;
+    classDef action fill:#1e293b,stroke:#22d3ee,stroke-width:1.5px,color:#f8fafc;
+    classDef training fill:#1e293b,stroke:#94a3b8,stroke-width:1.5px,color:#f8fafc;
 
     subgraph Loop["1. Real-Time Tick Loop (runbot.py ~350ms cycle)"]
         A["Screen Capture (ImageGrab)<br/>Resolution Scaled via Scaler"]:::capture
@@ -86,7 +96,7 @@ flowchart TD
     end
 
     subgraph StateSynth["3. State Vector Synthesis (core/agent.py)"]
-        S["Flatten State (439-Dim Vector)<br/>• Elixir (1)<br/>• 6 Towers HP% (6)<br/>• Hand One-Hot (4 x 88 = 352)<br/>• Top 20 Enemy BBoxes (80)"]:::brain
+        S["Flatten State (439-Dim Vector)<br/>• Elixir (1)<br/>• 6 Towers HP% (6)<br/>• Hand One-Hot (4 x 88 = 352)<br/>• Top 20 Enemy BBoxes (80)"]:::synth
     end
 
     subgraph Arbiter["4. Neuro-Symbolic Decision Engine (core/agent.py & tactical_brain.py)"]
