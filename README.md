@@ -12,39 +12,145 @@ An advanced, production-grade autonomous agent and training pipeline for **Clash
 
 ## 🏛️ System Architecture
 
-![Royale-RL Architecture](royale_rl_architecture_1080x1720.png)
+### Pipeline Architecture Overview
+
+```mermaid
+graph TD
+    subgraph S1["Perception Pipeline (Every Frame in RAM)"]
+        BS["BlueStacks Game Screen (565x1007)"] --> GRAB["ImageGrab.grab() (In-Memory PIL Frame)"]
+        GRAB --> CROP["Card Slot Cropper"]
+        GRAB --> FULL["Full Arena Frame (640x640)"]
+        GRAB --> OCR["Tower & Clock ROIs"]
+        GRAB --> ELX["Elixir Crop ROI"]
+        
+        CROP --> M1["Model 1: MobileNetV2\n(Card Classifier)"]
+        FULL --> M2["Model 2: YOLOv9-c\n(Enemy Detector)"]
+        OCR --> M_OCR["EasyOCR Engine"]
+        ELX --> M_ELX["Template Matching\n(OpenCV)"]
+        
+        M1 -->|"4 Cards: ['giant', ...]"| STATE["State Assembler\n(_flatten_state in agent.py)"]
+        M2 -->|"20 Troop BBoxes: [x1,y1,x2,y2]"| STATE
+        M_OCR -->|"6 Tower HP Deltas"| STATE
+        M_ELX -->|"Elixir Value (0-10)"| STATE
+    end
+
+    subgraph S2["Mathematical Representation"]
+        STATE --> VEC["Unified State Vector s_t\n(Length: 439 Floats)"]
+        VEC --> HIST["Trajectory Sequence Queue\n(Context Window K = 10)"]
+    end
+
+    subgraph S3["Neuro-Symbolic Decision Engine"]
+        HIST --> DT["Model 3: Decision Transformer\n(Conditioned on Target Return R = +2.0)"]
+        DT --> CAND["Action Candidate Proposals\n(Card Slot + 18x30 Grid)"]
+        
+        CAND --> TB{"TacticalBrain Filter\n(Symbolic Rules)"}
+        TB -->|"Passes: Anti-Air, Center-Pull, King Safe"| EXEC["Validated Action: (slot, x, y)"]
+        TB -->|"Fails Tactical Check"| NEXT_CAND["Evaluate Next Candidate"]
+        NEXT_CAND --> TB
+        TB -->|"All Rejected & Elixir >= 9"| RELIEF["Elixir Relief Valve\n(Drop Tank behind King)"]
+        RELIEF --> EXEC
+    end
+
+    subgraph S4["Execution & Learning"]
+        EXEC --> POST["Win32 PostMessage API\n(No Cursor Hijacking)"]
+        POST --> BS
+        EXEC --> BUFF["Replay Buffer (RAM / replay_buffer.pkl)\n(s_t, a_t, r_t, s_t+1)"]
+        BUFF --> TRAIN["Reward-Weighted\nGradient Update (Loss)"]
+    end
+```
+
+### End-to-End Decision & Real-Time Tick Loop
 
 ```mermaid
 flowchart TD
-    subgraph Perception ["1. Computer Vision & State Ingestion"]
-        BS["BlueStacks 5 Emulator\n(Clash Royale)"] -->|Screenshot Capture| SC["Scaler & DPI Normalizer\n(drivers/scaler.py)"]
-        SC -->|Bounding Box Crop| GSM["Game State Manager\n(drivers/game_state_manager.py)"]
-        GSM -->|In-Battle Frames| VIS["Vision Pipeline (core/vision.py)"]
-        VIS --> YOLO["YOLOv9 Enemy Unit Detector\n(weights/enemy_boundary_detector.pt)"]
-        VIS --> MNET["MobileNetV2 Hand Classifier\n(weights/hand_classifier_best.pth)"]
-        VIS --> OCR["EasyOCR & Template Matching\n(Tower HP & Elixir Gauge)"]
+    %% Styling & Theme
+    classDef capture fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef vision fill:#0f172a,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
+    classDef brain fill:#1e1b4b,stroke:#c084fc,stroke-width:2px,color:#f8fafc;
+    classDef model fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc;
+    classDef action fill:#701a75,stroke:#f472b6,stroke-width:2px,color:#f8fafc;
+    classDef training fill:#451a03,stroke:#fb923c,stroke-width:2px,color:#f8fafc;
+
+    subgraph Loop["1. Real-Time Tick Loop (runbot.py ~350ms cycle)"]
+        A["Screen Capture (ImageGrab)<br/>Resolution Scaled via Scaler"]:::capture
+        GS["GameStateManager.get_state()<br/>MatchTemplate on Anchors"]:::capture
     end
 
-    subgraph Cognition ["2. Hybrid Tactical & RL Brain"]
-        YOLO & MNET & OCR --> STATE["Structured State Vector\n(Shape: 1 + 6 + 4*Cards + 20*4)"]
-        STATE --> TB["Tactical Counter Engine\n(core/tactical_brain.py)"]
-        STATE --> DT["Decision Transformer RL Agent\n(core/agent.py)"]
-        TB -->|Priority Override\nDefense / Kiting / Snipes| ARB{"Action\nArbitrator"}
-        DT -->|Offline Learned Policy\nOffensive Plays| ARB
+    subgraph Perception["2. Vision & State Extraction (core/vision.py)"]
+        B["Vision.get_game_state()"]:::vision
+        
+        B1["<b>MobileNetV2 Classifier</b><br/>Input: 4 cropped card slots (128x128)<br/>Output: Active Hand Cards"]:::vision
+        B2["<b>YOLOv9 Detector</b><br/>Input: Arena RGB frame (640x640)<br/>Output: Enemy Bounding Boxes & Names"]:::vision
+        B3["<b>EasyOCR Reader</b><br/>Input: 6 Tower HP regions + Timer<br/>Output: Digits & Health Percentages"]:::vision
+        B4["<b>Elixir Tracker & Vision</b><br/>Tick Accrual + CV2 Template Sync<br/>Output: Float Elixir [0.0 - 10.0]"]:::vision
     end
 
-    subgraph Actuation ["3. Windows Driver Actuation"]
-        ARB --> ACT["Discrete Action\n(Card Index + Grid X, Y)"]
-        ACT --> CTRL["Controller Driver\n(drivers/controller.py)"]
-        CTRL -->|Direct PostMessage\nZero Cursor Hijacking| BS
+    subgraph StateSynth["3. State Vector Synthesis (core/agent.py)"]
+        S["Flatten State (439-Dim Vector)<br/>• Elixir (1)<br/>• 6 Towers HP% (6)<br/>• Hand One-Hot (4 x 88 = 352)<br/>• Top 20 Enemy BBoxes (80)"]:::brain
     end
 
-    subgraph Learning ["4. Continuous Reinforcement Learning"]
-        ACT --> BUFF["Replay Buffer (Compact Pickled)\n(data/replay_buffer.pkl)"]
-        BUFF --> TRAIN["Optimized Training Pipeline\n(training/optimized_train.py)"]
-        TRAIN -->|Updated Weights| WEIGHTS["Model Weights\n(weights/rl_agent.pt)"]
-        WEIGHTS -.-> DT
+    subgraph Arbiter["4. Neuro-Symbolic Decision Engine (core/agent.py & tactical_brain.py)"]
+        TB_Mandatory{"TacticalBrain.get_mandatory_action()<br/>Any Critical Threat or Lethal Win?"}:::brain
+        
+        M_Spell["Rule 1: Spell-Snipe Finisher<br/>(Tower HP <= 280 / 140)"]:::brain
+        M_Threat["Rule 3 & 14: Emergency Threat Defense<br/>(Center-Pull Kiting vs Approaching Push)"]:::brain
+        M_Pocket["Rule 10: Pocket King Assault<br/>(Enemy Princess Tower Down)"]:::brain
+        M_Leak["Rule 7: 10-Elixir Leak Prevention<br/>(Cycle Card Behind King)"]:::brain
+        
+        TacticalLock{"TacticalBrain.has_unresolved_threat()<br/>High Threat Approaching?"}:::brain
+        HoldElixir["HOLD ELIXIR<br/>Do not squander elixir on attack"]:::brain
+
+        Epsilon{"Random < Epsilon?<br/>(Exploration vs Exploitation)"}:::brain
+        
+        RandAction["Sample Random Playable Card & Grid"]:::brain
+        
+        DT_Inference["<b>Decision Transformer Model</b><br/>Input: State (439d), Last Action, Target Return (+2.0), Step<br/>Output: 48,060 Action Logits<br/>(Masked to Playable Cards in Hand)"]:::model
+        
+        Validate{"TacticalBrain.validate_candidate_action()<br/>Check Negative Constraints:<br/>• Wake King early?<br/>• Ground melee vs Air?<br/>• Naked bridge giant?<br/>• Attack during defense?"}:::brain
+        
+        CorrectAction["Corrected / Shifted Action<br/>(e.g., Safe Pullback, Lane Shift)"]:::brain
+        RejectAction["Reject Action (None)"]:::brain
+        ReliefValve["Elixir Relief Valve (Elixir >= 9.0)"]:::brain
     end
+
+    subgraph Execution["5. Motor Output & Driver (drivers/controller.py)"]
+        EXEC["Controller.play_card()<br/>1. Click Card Slot<br/>2. Click Placement Grid Coordinate"]:::action
+        DEDUCT["ElixirTracker.deduct(cost)<br/>Instant Elixir Deduction"]:::action
+    end
+
+    subgraph PostMatch["6. Replay Buffer & Training (core/agent.py)"]
+        BUFF["ReplayBuffer.add(s, a, r, s')<br/>Experience Logging"]:::training
+        TRAIN["Decision Transformer Training<br/>Reward-Weighted Cross-Entropy<br/>weights = clamp(1 + r, 0.2, 3.0)"]:::training
+    end
+
+    %% Wiring
+    A --> GS
+    GS -->|IN_BATTLE| B
+    B --> B1 & B2 & B3 & B4
+    B1 & B2 & B3 & B4 --> S
+    S --> TB_Mandatory
+
+    TB_Mandatory -->|Triggered| M_Spell & M_Threat & M_Pocket & M_Leak
+    M_Spell & M_Threat & M_Pocket & M_Leak --> EXEC
+
+    TB_Mandatory -->|None| TacticalLock
+    TacticalLock -->|Yes & Elixir < 9.5| HoldElixir
+    TacticalLock -->|No| Epsilon
+
+    Epsilon -->|True| RandAction
+    Epsilon -->|False| DT_Inference
+
+    RandAction --> Validate
+    DT_Inference --> Validate
+
+    Validate -->|Valid| EXEC
+    Validate -->|Violates Rule| CorrectAction --> EXEC
+    Validate -->|Invalid/Blocked| RejectAction --> ReliefValve
+    ReliefValve -->|Elixir >= 9.0| EXEC
+
+    EXEC --> DEDUCT
+    EXEC --> BUFF
+    BUFF -->|Match Ends| TRAIN
 ```
 
 ---
