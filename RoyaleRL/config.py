@@ -1,9 +1,37 @@
-# filename: config.py
 import os
 
+# Project Root & Directory Paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEIGHTS_DIR = os.path.join(BASE_DIR, "weights")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DRIVERS_DIR = os.path.join(BASE_DIR, "drivers")
+CORE_DIR = os.path.join(BASE_DIR, "core")
+
+def resolve_path(filename, search_dirs=None):
+    """Finds a file in preferred directory or root fallback."""
+    if os.path.isabs(filename) and os.path.exists(filename):
+        return filename
+    if search_dirs is None:
+        search_dirs = [WEIGHTS_DIR, DATA_DIR, BASE_DIR]
+    for d in search_dirs:
+        candidate = os.path.join(d, filename)
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(search_dirs[0], filename)
+
 # --- AI Model Paths ---
-MODEL_PATH = "hand_classifier_best.pth"
-CLASS_NAMES_PATH = "class_names.txt"
+MODEL_PATH = resolve_path("hand_classifier_best.pth", [WEIGHTS_DIR, BASE_DIR])
+CLASS_NAMES_PATH = resolve_path("class_names.txt", [WEIGHTS_DIR, BASE_DIR])
+YOLO_MODEL_PATH = resolve_path("enemy_boundary_detector.pt", [WEIGHTS_DIR, BASE_DIR])
+RL_MODEL_PATH = resolve_path("rl_agent.pt", [WEIGHTS_DIR, BASE_DIR])
+RL_CHECKPOINT_PATH = resolve_path("rl_agent_checkpoint.pt", [WEIGHTS_DIR, BASE_DIR])
+RL_FINAL_PATH = resolve_path("rl_agent_final.pt", [WEIGHTS_DIR, BASE_DIR])
+
+# --- Data & Experience Paths ---
+REPLAY_BUFFER_PATH = resolve_path("replay_buffer.pkl", [DATA_DIR, BASE_DIR])
+TRAINING_STATS_PATH = resolve_path("training_stats.json", [DATA_DIR, BASE_DIR])
+SORTED_DATA_PATH = os.path.join(DATA_DIR, "sorted_data") if os.path.exists(os.path.join(DATA_DIR, "sorted_data")) else os.path.join(BASE_DIR, "sorted_data")
+
 REFERENCE_RESOLUTION = (565, 1007)
 # --- Image Processing Constants ---
 IMG_SIZE = 128
@@ -61,17 +89,25 @@ CARD_COSTS = {
 ALL_CARDS = list(CARD_COSTS.keys())
 CARD_TO_INDEX = {name: i for i, name in enumerate(ALL_CARDS)}
 NUM_CARD_TYPES = len(ALL_CARDS)
+# INC-1 FIX: Define STATE_DIM once here so all modules import it consistently.
+STATE_DIM = 1 + 6 + (4 * NUM_CARD_TYPES) + (20 * 4)
 
 # --- Shared Utility Functions ---
 def get_health_percentage(ocr_value, tower_type):
     max_health = KING_TOWER_MAX_HEALTH if tower_type == 'king' else PRINCESS_TOWER_MAX_HEALTH
+    # BUG-CF1 FIX: Returning 0.0 for a princess tower on OCR failure falsely
+    # marks it as destroyed, triggering premature pocket/breach assaults.
+    # Safe default = 1.0 (assume the tower is alive) for all types.
+    if ocr_value is None or str(ocr_value).strip() == '':
+        return 1.0
     try:
-        health = min(int(ocr_value or 0), max_health)
+        health = min(int(ocr_value), max_health)
         return health / max_health
     except (ValueError, TypeError):
-        return 1.0 if tower_type == 'king' else 0.0
+        return 1.0
 
 
 # --- Debugging ---
 # Set to True to show a live window with the OCR and card boxes drawn.
-DEBUG_VISUALS = True
+# BUG-CF2 NOTE: This flag is now wired into vision.py's get_game_state().
+DEBUG_VISUALS = False

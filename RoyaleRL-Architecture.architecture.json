@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RoyaleRL - Deep RL Clash Royale Autonomous System",
+    "output": "RoyaleRL-Architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "emulator",
+      "type": "external",
+      "label": "Game Emulator",
+      "sublabel": "BlueStacks / Phone (ADB)",
+      "pos": [40, 240],
+      "size": [160, 68],
+      "tag": "Clash Royale"
+    },
+    {
+      "id": "controller",
+      "type": "backend",
+      "label": "Input Controller",
+      "sublabel": "controller.py",
+      "pos": [320, 120],
+      "size": [160, 68],
+      "tag": "ADB Touch / Swipes"
+    },
+    {
+      "id": "vision",
+      "type": "backend",
+      "label": "Vision Pipeline",
+      "sublabel": "vision.py + YOLOv8",
+      "pos": [320, 360],
+      "size": [160, 68],
+      "tag": "OpenCV screencap"
+    },
+    {
+      "id": "orchestrator",
+      "type": "frontend",
+      "label": "Bot Orchestrator",
+      "sublabel": "runbot.py",
+      "pos": [600, 120],
+      "size": [160, 68],
+      "tag": "Match Loop & State"
+    },
+    {
+      "id": "scaler",
+      "type": "backend",
+      "label": "Coordinate Scaler",
+      "sublabel": "scaler.py",
+      "pos": [600, 360],
+      "size": [160, 68],
+      "tag": "18x30 Grid Mapping"
+    },
+    {
+      "id": "recorder",
+      "type": "messagebus",
+      "label": "Human Recorder",
+      "sublabel": "human_recorder.py",
+      "pos": [600, 520],
+      "size": [160, 68],
+      "tag": "Teacher Demos"
+    },
+    {
+      "id": "tactical",
+      "type": "security",
+      "label": "Tactical Brain",
+      "sublabel": "tactical_brain.py",
+      "pos": [880, 120],
+      "size": [160, 68],
+      "tag": "Rules & Threat Matrix"
+    },
+    {
+      "id": "gamestate",
+      "type": "database",
+      "label": "Game State Manager",
+      "sublabel": "game_state_manager.py",
+      "pos": [880, 360],
+      "size": [160, 68],
+      "tag": "Elixir, HP, Hand"
+    },
+    {
+      "id": "trainer",
+      "type": "cloud",
+      "label": "Training Pipeline",
+      "sublabel": "optimized_train.py",
+      "pos": [880, 520],
+      "size": [160, 68],
+      "tag": "PyTorch CUDA"
+    },
+    {
+      "id": "rl_agent",
+      "type": "backend",
+      "label": "Deep RL Policy",
+      "sublabel": "agent.py",
+      "pos": [1160, 240],
+      "size": [160, 68],
+      "tag": "Actor-Critic / PPO"
+    },
+    {
+      "id": "replay_buffer",
+      "type": "database",
+      "label": "Replay Experience",
+      "sublabel": "replay_buffer.pkl",
+      "pos": [1160, 520],
+      "size": [160, 68],
+      "tag": "Offline & Online Buffer"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Perception & State Space",
+      "wraps": ["vision", "scaler", "gamestate"]
+    },
+    {
+      "kind": "region",
+      "label": "Decision & Reasoning Core",
+      "wraps": ["tactical", "orchestrator", "rl_agent"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Learning & Memory Store",
+      "wraps": ["replay_buffer", "trainer"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "emu-to-vision",
+      "from": "emulator",
+      "to": "vision",
+      "label": "Raw Frames",
+      "variant": "emphasis"
+    },
+    {
+      "id": "vision-to-scaler",
+      "from": "vision",
+      "to": "scaler",
+      "label": "BBox Detections"
+    },
+    {
+      "id": "scaler-to-gamestate",
+      "from": "scaler",
+      "to": "gamestate",
+      "label": "Norm Grid"
+    },
+    {
+      "id": "gamestate-to-tactical",
+      "from": "gamestate",
+      "to": "tactical",
+      "label": "Threats",
+      "variant": "security"
+    },
+    {
+      "id": "gamestate-to-agent",
+      "from": "gamestate",
+      "to": "rl_agent",
+      "label": "State Vector",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tactical-to-orchestrator",
+      "from": "tactical",
+      "to": "orchestrator",
+      "label": "Rule Priority"
+    },
+    {
+      "id": "agent-to-orchestrator",
+      "from": "rl_agent",
+      "to": "orchestrator",
+      "label": "Action Vector"
+    },
+    {
+      "id": "orchestrator-to-ctrl",
+      "from": "orchestrator",
+      "to": "controller",
+      "label": "Action Input",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ctrl-to-emulator",
+      "from": "controller",
+      "to": "emulator",
+      "label": "Touch Drag",
+      "variant": "emphasis"
+    },
+    {
+      "id": "recorder-to-buffer",
+      "from": "recorder",
+      "to": "replay_buffer",
+      "label": "Demonstrations",
+      "variant": "dashed"
+    },
+    {
+      "id": "buffer-to-trainer",
+      "from": "replay_buffer",
+      "to": "trainer",
+      "label": "Batch Sample"
+    },
+    {
+      "id": "trainer-to-agent",
+      "from": "trainer",
+      "to": "rl_agent",
+      "label": "PPO Weights",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Perception & Scaling",
+      "items": [
+        "vision.py captures live emulator frames via scrcpy / PIL",
+        "YOLOv8 detects cards in hand, enemy troops, and tower HP bars",
+        "scaler.py transforms screen pixels to normalized 18x30 tile coordinates"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Dual Decision Engine",
+      "items": [
+        "tactical_brain.py checks high-threat counters and defense zones",
+        "agent.py Deep RL network predicts optimal card placement and elixir timing",
+        "runbot.py arbitrates emergency rule overrides vs neural policy output"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Continuous Learning Loop",
+      "items": [
+        "human_recorder.py records human demonstrations for offline imitation",
+        "replay_buffer.pkl stores transitions with crown-differential rewards",
+        "optimized_train.py trains policy and value heads with GPU acceleration"
+      ]
+    }
+  ]
+}

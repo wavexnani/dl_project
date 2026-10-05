@@ -1,0 +1,87 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "RoyaleRL - Autonomous Match & Decision Workflow",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": "RoyaleRL-MatchWorkflow.html"
+  },
+  "lanes": [
+    { "id": "perception", "label": "Perception & State Space" },
+    { "id": "tactics", "label": "Tactical Rules & Defense", "variant": "exception" },
+    { "id": "policy", "label": "Deep RL Strategy & Planning" },
+    { "id": "controller", "label": "Action Execution & ADB" }
+  ],
+  "phases": [
+    { "id": "phase_sense", "label": "Observation", "fromCol": 0, "toCol": 2 },
+    { "id": "phase_decide", "label": "Decision & Arbitration", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
+    { "id": "phase_act", "label": "Execution & Feedback", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "sensing_group", "label": "Vision Pipeline", "lane": "perception", "fromCol": 0, "toCol": 2, "variant": "emphasis" },
+    { "id": "tactical_group", "label": "Rule-Based Defense", "lane": "tactics", "fromCol": 3, "toCol": 4, "variant": "security" },
+    { "id": "neural_group", "label": "Policy Evaluation", "lane": "policy", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
+    { "id": "control_group", "label": "Device Interaction", "lane": "controller", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "screencap",
+    "vision_yolo",
+    "state_mgr",
+    "rl_eval",
+    "arbitrator",
+    "touch_dispatcher",
+    "reward_tracker"
+  ],
+  "nodes": [
+    { "id": "screencap", "lane": "perception", "col": 0, "type": "external", "label": "Screen Capture", "sublabel": "PIL / Scrcpy frame", "width": 136 },
+    { "id": "vision_yolo", "lane": "perception", "col": 1, "type": "backend", "label": "Vision YOLOv8", "sublabel": "troops, cards, HP", "width": 136 },
+    { "id": "state_mgr", "lane": "perception", "col": 2, "type": "database", "label": "State Manager", "sublabel": "114-D vector & elixir", "tag": "normalized", "width": 136 },
+    { "id": "threat_eval", "lane": "tactics", "col": 3, "type": "security", "label": "Threat Matrix", "sublabel": "bridge push / tank", "tag": "reactive", "width": 136 },
+    { "id": "emergency_gate", "lane": "tactics", "col": 4, "type": "security", "label": "Emergency Gate", "sublabel": "defense required?", "width": 136 },
+    { "id": "rl_eval", "lane": "policy", "col": 3, "type": "backend", "label": "Actor-Critic PPO", "sublabel": "action probs π(a|s)", "tag": "macro policy", "width": 136 },
+    { "id": "arbitrator", "lane": "policy", "col": 4, "type": "frontend", "label": "Action Arbiter", "sublabel": "rule vs neural pick", "width": 136 },
+    { "id": "touch_dispatcher", "lane": "controller", "col": 5, "type": "backend", "label": "ADB Dispatcher", "sublabel": "drag card to (x,y)", "width": 136 },
+    { "id": "reward_tracker", "lane": "policy", "col": 5, "type": "database", "label": "Reward Tracker", "sublabel": "crown Δ & tower HP", "tag": "buffer store", "width": 136 }
+  ],
+  "edges": [
+    { "id": "cap-to-yolo", "from": "screencap", "to": "vision_yolo", "label": "frame", "variant": "default" },
+    { "id": "yolo-to-mgr", "from": "vision_yolo", "to": "state_mgr", "label": "boxes", "variant": "default" },
+    { "id": "mgr-to-threat", "from": "state_mgr", "to": "threat_eval", "label": "board state", "variant": "security" },
+    { "id": "threat-to-gate", "from": "threat_eval", "to": "emergency_gate", "label": "threat level", "variant": "security" },
+    { "id": "mgr-to-rl", "from": "state_mgr", "to": "rl_eval", "label": "state vector", "variant": "emphasis" },
+    { "id": "gate-to-arb", "from": "emergency_gate", "to": "arbitrator", "label": "counter override", "variant": "security" },
+    { "id": "rl-to-arb", "from": "rl_eval", "to": "arbitrator", "label": "policy action", "variant": "emphasis" },
+    { "id": "arb-to-dispatch", "from": "arbitrator", "to": "touch_dispatcher", "label": "execute action", "variant": "emphasis" },
+    { "id": "dispatch-to-reward", "from": "touch_dispatcher", "to": "reward_tracker", "label": "match diff", "variant": "default" },
+    { "id": "reward-to-mgr", "from": "reward_tracker", "to": "state_mgr", "label": "store transition", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Perception Loop",
+      "items": [
+        "vision.py grabs 30 FPS emulator frames",
+        "Extracts friendly/enemy troop bounding boxes and card cooldowns",
+        "Constructs unified observation tensor for decision modules"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Tactical Prioritization",
+      "items": [
+        "TacticalBrain prioritizes immediate defensive threats (e.g. Hog Rider at tower)",
+        "Overrides neural network when hard counters are mandatory"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Reinforcement Learning Feedback",
+      "items": [
+        "Tracks incremental crown damage and elixir advantage",
+        "Saves (s, a, r, s') experience tuples for offline and online PPO updates"
+      ]
+    }
+  ]
+}

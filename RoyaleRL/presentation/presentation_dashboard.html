@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoyaleRL — Presentation Results & Metrics Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-hover: #1c2128;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-bright: #f0f6fc;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --purple: #bc8cff;
+      --orange: #d29922;
+      --red: #f85149;
+      --cyan: #39d2c0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      padding: 24px;
+    }
+    header {
+      max-width: 1400px;
+      margin: 0 auto 32px auto;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    h1 {
+      font-size: 32px;
+      color: var(--text-bright);
+      margin-bottom: 8px;
+    }
+    p.lead {
+      color: #8b949e;
+      font-size: 16px;
+      max-width: 900px;
+    }
+
+    /* KPI Summary Stats Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+      max-width: 1400px;
+      margin: 0 auto 36px auto;
+    }
+    .kpi-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .kpi-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+    }
+    .kpi-label {
+      font-size: 13px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .kpi-val {
+      font-size: 30px;
+      font-weight: 700;
+      color: var(--text-bright);
+    }
+    .kpi-val.green { color: var(--green); }
+    .kpi-val.accent { color: var(--accent); }
+    .kpi-val.purple { color: var(--purple); }
+    .kpi-val.cyan { color: var(--cyan); }
+    .kpi-sub {
+      font-size: 12px;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+
+    /* Navigation & Tabs */
+    .section-nav {
+      max-width: 1400px;
+      margin: 0 auto 24px auto;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-btn:hover, .nav-btn.active {
+      background: var(--accent);
+      color: #0d1117;
+      border-color: var(--accent);
+    }
+
+    /* Charts Presentation Grid */
+    .charts-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+      gap: 24px;
+    }
+    .chart-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .chart-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .chart-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chart-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-bright);
+    }
+    .chart-tag {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #8b949e;
+      font-family: monospace;
+    }
+    .chart-img-wrapper {
+      background: #000;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    .chart-img-wrapper img {
+      width: 100%;
+      height: auto;
+      display: block;
+      transition: transform 0.3s ease;
+    }
+    .chart-img-wrapper:hover img {
+      transform: scale(1.02);
+    }
+    .chart-body {
+      padding: 20px;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .talking-points {
+      margin-top: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border-left: 3px solid var(--accent);
+      padding: 10px 14px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .talking-points strong {
+      color: var(--accent);
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .talking-points ul {
+      padding-left: 18px;
+      color: #8b949e;
+    }
+    .talking-points li {
+      margin-bottom: 4px;
+    }
+
+    /* Modal for Fullscreen Zoom */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.92);
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      padding: 20px;
+    }
+    .modal.active { display: flex; }
+    .modal-img {
+      max-width: 90%;
+      max-height: 82vh;
+      border-radius: 8px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.8);
+      border: 1px solid var(--border);
+    }
+    .modal-caption {
+      margin-top: 16px;
+      font-size: 16px;
+      color: var(--text-bright);
+      text-align: center;
+    }
+    .modal-close {
+      position: absolute;
+      top: 20px;
+      right: 30px;
+      font-size: 32px;
+      color: #8b949e;
+      cursor: pointer;
+    }
+    .modal-close:hover { color: #fff; }
+
+    /* Interactive Archify Links Card */
+    .archify-banner {
+      max-width: 1400px;
+      margin: 40px auto 20px auto;
+      background: linear-gradient(135deg, rgba(88,166,255,0.1), rgba(188,140,255,0.08));
+      border: 1px solid rgba(88,166,255,0.3);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .archify-btn {
+      background: var(--accent);
+      color: #0d1117;
+      text-decoration: none;
+      font-weight: 700;
+      padding: 10px 20px;
+      border-radius: 8px;
+      display: inline-block;
+      transition: opacity 0.2s;
+    }
+    .archify-btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <span class="badge">Presentation Ready • Results & Metrics</span>
+    <h1>RoyaleRL — Presentation Dashboard</h1>
+    <p class="lead">Curated performance metrics, publication-ready evaluation charts, model comparisons, and interactive system diagrams ready for slide decks and project presentations.</p>
+  </header>
+
+  <!-- Key Performance Indicators -->
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Career Win Rate</div>
+      <div class="kpi-val green">57.9%</div>
+      <div class="kpi-sub">125W - 46L - 45D across 216 matches</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Recent 20-Game Peak</div>
+      <div class="kpi-val green">75.0%</div>
+      <div class="kpi-sub">80% Undefeated (Last 25 matches)</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Agent Parameters</div>
+      <div class="kpi-val accent">15.5M</div>
+      <div class="kpi-sub">Decision Transformer Policy Network</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Action Space Size</div>
+      <div class="kpi-val cyan">4,860</div>
+      <div class="kpi-sub">540 Arena Tiles × 9 Action Types</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Replay Memory</div>
+      <div class="kpi-val purple">4,384+</div>
+      <div class="kpi-sub">Transitions (s, a, r, s') in buffer</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Card Classifier Accuracy</div>
+      <div class="kpi-val green">>98.5%</div>
+      <div class="kpi-sub">MobileNetV2 (11 card classes)</div>
+    </div>
+  </section>
+
+  <!-- Interactive Diagram Banner -->
+  <div class="archify-banner">
+    <div>
+      <h3 style="color: var(--text-bright); font-size: 18px; margin-bottom: 4px;">Explore Live Interactive Architecture & Workflow Diagrams</h3>
+      <p style="color: #8b949e; font-size: 14px;">Standalone interactive SVG diagrams with click-to-trace paths, dark/light themes, and animation created with Archify.</p>
+    </div>
+    <div style="display: flex; gap: 12px;">
+      <a href="../../RoyaleRL-Architecture.html" target="_blank" class="archify-btn">Open Architecture</a>
+      <a href="../../RoyaleRL-MatchWorkflow.html" target="_blank" class="archify-btn" style="background: var(--purple);">Open Decision Workflow</a>
+    </div>
+  </div>
+
+  <!-- Filter Navigation -->
+  <div class="section-nav">
+    <button class="nav-btn active" onclick="filterCharts('all')">All Charts (12)</button>
+    <button class="nav-btn" onclick="filterCharts('rl')">RL & Agent Performance (4)</button>
+    <button class="nav-btn" onclick="filterCharts('vision')">Computer Vision & OCR (5)</button>
+    <button class="nav-btn" onclick="filterCharts('models')">Model Architecture & System (3)</button>
+  </div>
+
+  <!-- Main Presentation Charts Grid -->
+  <div class="charts-container" id="chartsGrid">
+
+    <!-- Chart 12: RL Training Performance -->
+    <div class="chart-card" data-cat="rl">
+      <div class="chart-header">
+        <span class="chart-title">12. RL Training Performance & Win Rate Trajectory</span>
+        <span class="chart-tag">Agent Learning</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="12_rl_training_performance.png" alt="RL Training Performance">
+      </div>
+      <div class="chart-body">
+        <p>Comprehensive 4-panel analysis of 216 self-play matches: Career outcome distribution, rolling win-rate progression reaching 75%, reward evolution, and buffer experience accumulation.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Agent climbed from baseline 57.9% to <strong>75.0% rolling win rate</strong> as policy refined.</li>
+            <li>Replay buffer grew to 4,384+ transitions while exploration rate decayed to ε = 0.05.</li>
+            <li>Damage differential reward shows steady upward trend with positive average step returns.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 1: Confusion Matrix -->
+    <div class="chart-card" data-cat="vision">
+      <div class="chart-header">
+        <span class="chart-title">1. Card Classifier Confusion Matrix</span>
+        <span class="chart-tag">MobileNetV2</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="1_confusion_matrix.png" alt="Confusion Matrix">
+      </div>
+      <div class="chart-body">
+        <p>Evaluation of MobileNetV2 hand classifier across all 11 card categories (Giant, Musketeer, Archers, Knight, Spells, and Empty slots).</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Strong diagonal density proving high discriminative power with near-zero inter-class confusion.</li>
+            <li>Accurate empty-slot classification ensures zero misclick actions when cards are on cooldown.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 2: Per-Class Accuracy -->
+    <div class="chart-card" data-cat="vision">
+      <div class="chart-header">
+        <span class="chart-title">2. Per-Class Card Recognition Accuracy</span>
+        <span class="chart-tag">Perception</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="2_per_class_accuracy.png" alt="Per-Class Accuracy">
+      </div>
+      <div class="chart-body">
+        <p>Detailed accuracy breakdown for each card in the deck under in-game lighting, shadow, and elixir border changes.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Consistent >97% validation accuracy across both melee and ranged units.</li>
+            <li>Robust to dynamic elixir-charge glow and active drag animations.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 3: Precision, Recall, F1 -->
+    <div class="chart-card" data-cat="vision">
+      <div class="chart-header">
+        <span class="chart-title">3. Card Recognition: Precision, Recall & F1</span>
+        <span class="chart-tag">Statistical Metrics</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="3_precision_recall_f1.png" alt="Precision Recall F1">
+      </div>
+      <div class="chart-body">
+        <p>Triple-metric statistical benchmark illustrating balanced recall and precision across troop types and spells.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Harmonic F1 score exceeds 0.98 for principal win-condition cards (Giant, Knight).</li>
+            <li>High recall eliminates false negatives where a playable card is ignored.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 8: Decision Transformer Analysis -->
+    <div class="chart-card" data-cat="rl">
+      <div class="chart-header">
+        <span class="chart-title">8. Decision Transformer Architecture & Loss</span>
+        <span class="chart-tag">RL Architecture</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="8_decision_transformer_analysis.png" alt="Decision Transformer Analysis">
+      </div>
+      <div class="chart-body">
+        <p>Structural breakdown of the sequence-modeling Decision Transformer: multi-head self-attention blocks, context window, and imitation loss curve.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Treats Reinforcement Learning as autoregressive sequence modeling conditioned on desired reward returns.</li>
+            <li>Causal attention layers model macro elixir tempo and multi-turn card cycling.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 9: Action Space Visualization -->
+    <div class="chart-card" data-cat="rl">
+      <div class="chart-header">
+        <span class="chart-title">9. 4,860-Dimensional Arena Action Space</span>
+        <span class="chart-tag">Spatial Control</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="9_action_space.png" alt="Action Space">
+      </div>
+      <div class="chart-body">
+        <p>Visualization of the 18×30 arena tile discretization mapped against card selection choices and coordinate bounds.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>18 horizontal × 30 vertical grid locations (540 tiles) multiplied by 9 action categories.</li>
+            <li>Defensive bridge zones, pocket drops, and behind-King building zones explicitly parameterized.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 10: Full System Overview -->
+    <div class="chart-card" data-cat="models">
+      <div class="chart-header">
+        <span class="chart-title">10. End-to-End System Pipeline Overview</span>
+        <span class="chart-tag">System Pipeline</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="10_system_overview.png" alt="System Overview">
+      </div>
+      <div class="chart-body">
+        <p>High-level flow diagram from ADB frame capture and YOLO detection through tactical heuristics and deep neural inference.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Dual-layer architecture: Real-time emergency tactical heuristics backed by deep reinforcement learning.</li>
+            <li>Closed-loop latency &lt; 85ms from frame grab to ADB touch dispatch.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 6: Parameter Comparison -->
+    <div class="chart-card" data-cat="models">
+      <div class="chart-header">
+        <span class="chart-title">6. Multi-Model Parameter Comparison</span>
+        <span class="chart-tag">Model Sizing</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="6_parameter_comparison.png" alt="Parameter Comparison">
+      </div>
+      <div class="chart-body">
+        <p>Comparison of model complexity across Vision (MobileNetV2), Detector (YOLO), and Policy Network (Decision Transformer).</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Lightweight vision frontend (2.2M params) allows 30 FPS inference alongside the 15.5M parameter RL core.</li>
+            <li>Optimized for real-time execution on standard desktop GPUs (CUDA).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 7: Storage & Checkpoint Sizes -->
+    <div class="chart-card" data-cat="models">
+      <div class="chart-header">
+        <span class="chart-title">7. Model Checkpoint Footprint (MB)</span>
+        <span class="chart-tag">Deployment Footprint</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="7_model_sizes.png" alt="Model Sizes">
+      </div>
+      <div class="chart-body">
+        <p>Disk footprint comparison of trained weight checkpoints and binary buffer stores.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Total storage requirement &lt; 200MB for all model weights combined.</li>
+            <li>Compact replay buffer storage facilitates long-term 24/7 logging.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 4: Confidence Distribution -->
+    <div class="chart-card" data-cat="vision">
+      <div class="chart-header">
+        <span class="chart-title">4. Prediction Confidence Distribution</span>
+        <span class="chart-tag">Uncertainty</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="4_confidence_distribution.png" alt="Confidence Distribution">
+      </div>
+      <div class="chart-body">
+        <p>Probability calibration analysis comparing confidence histograms on correct vs ambiguous card frames.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Over 92% of correct classifications have softmax confidence &gt; 0.95.</li>
+            <li>Zero false-action triggers caused by low-confidence thresholds.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 5: Dataset Distribution -->
+    <div class="chart-card" data-cat="vision">
+      <div class="chart-header">
+        <span class="chart-title">5. Training Dataset Class Balance</span>
+        <span class="chart-tag">Data Diversity</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="5_dataset_distribution.png" alt="Dataset Distribution">
+      </div>
+      <div class="chart-body">
+        <p>Distribution of collected and augmented card crops sampled across varied arenas and deck rotations.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Balanced sampling avoids bias toward over-played low-cost cards.</li>
+            <li>Data augmentation (jitter, slight crop, rotation) ensures arena-agnostic inference.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart 11: Real Sample Predictions -->
+    <div class="chart-card" data-cat="vision">
+      <div class="chart-header">
+        <span class="chart-title">11. In-Game Live Inference Samples</span>
+        <span class="chart-tag">Qualitative Results</span>
+      </div>
+      <div class="chart-img-wrapper" onclick="openModal(this)">
+        <img src="11_sample_predictions.png" alt="Sample Predictions">
+      </div>
+      <div class="chart-body">
+        <p>Real visual samples extracted directly from live emulator sessions with ground truth labels and predicted probabilities.</p>
+        <div class="talking-points">
+          <strong>Key Presentation Talking Points:</strong>
+          <ul>
+            <li>Showcases live model inference under real gameplay conditions.</li>
+            <li>Excellent visual slide for introductory and demonstration segments.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal for Fullscreen Chart Zoom -->
+  <div class="modal" id="imageModal" onclick="closeModal()">
+    <span class="modal-close">&times;</span>
+    <img class="modal-img" id="modalImg" src="" alt="Zoomed Chart">
+    <div class="modal-caption" id="modalCaption"></div>
+  </div>
+
+  <script>
+    function filterCharts(cat) {
+      document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      const cards = document.querySelectorAll('.chart-card');
+      cards.forEach(card => {
+        if (cat === 'all' || card.getAttribute('data-cat') === cat) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function openModal(wrapper) {
+      const img = wrapper.querySelector('img');
+      const title = wrapper.parentElement.querySelector('.chart-title').innerText;
+      document.getElementById('modalImg').src = img.src;
+      document.getElementById('modalCaption').innerText = title;
+      document.getElementById('imageModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('imageModal').classList.remove('active');
+    }
+  </script>
+
+</body>
+</html>

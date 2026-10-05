@@ -16,35 +16,38 @@ Features:
 =================================================================
 """
 
+import os
+import sys
 import time
 import cv2
 import json
-import os
-import sys
 import argparse
-import random
 import torch
+import numpy as np
 from PIL import ImageGrab
 
-from scaler import Scaler
-from game_state_manager import GameStateManager
-from controller import Controller
-from vision import Vision
-from agent import Agent
-from power_manager import keep_awake
-from human_recorder import HumanRecorder
-import config
-from config import get_health_percentage, CARD_TO_INDEX, NUM_CARD_TYPES, CARD_COSTS
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+for sub in ["core", "drivers", "training", "evaluation"]:
+    sub_path = os.path.join(BASE_DIR, sub)
+    if sub_path not in sys.path:
+        sys.path.insert(0, sub_path)
 
-ALL_CARDS = list(CARD_COSTS.keys())
-CARD_TO_INDEX = {name: i for i, name in enumerate(ALL_CARDS)}
-NUM_CARD_TYPES = len(ALL_CARDS)
+from drivers.scaler import Scaler
+from drivers.game_state_manager import GameStateManager
+from drivers.controller import Controller
+from core.vision import Vision
+from core.agent import Agent
+from drivers.power_manager import keep_awake
+from training.human_recorder import HumanRecorder
+import config
+from config import get_health_percentage, CARD_TO_INDEX, NUM_CARD_TYPES, CARD_COSTS, ALL_CARDS, STATE_DIM
 
 x_steps = 18
 y_steps = 30
 NUM_GRID_LOCATIONS = x_steps * y_steps
 ACTION_DIM = (NUM_CARD_TYPES + 1) * NUM_GRID_LOCATIONS
-STATE_DIM = 1 + 6 + (4 * NUM_CARD_TYPES) + (20 * 4)
 
 def find_cards_dynamically(scaler):
     game_area = scaler.game_area_rect
@@ -99,13 +102,9 @@ def calculate_reward(last_state, current_state):
     damage_taken = max(0, last_friendly_hp - current_friendly_hp)
     reward = (damage_dealt * 1.2) - (damage_taken * 1.0)
 
-    num_enemies_last = len(last_state.get('enemies', []))
-    num_enemies_current = len(current_state.get('enemies', []))
-    enemies_destroyed = num_enemies_last - num_enemies_current
-    
-    if enemies_destroyed > 0:
-        enemy_reward = enemies_destroyed * ENEMY_DESTROYED_REWARD
-        reward += enemy_reward
+    # BUG 18 FIX: Raw detection count fluctuated every frame as troops walked behind towers
+    # or were temporarily occluded, creating false-positive rewards that corrupted replay memory.
+    # Rely on ground-truth tower damage (damage_dealt/damage_taken) and match outcome rewards.
 
     king_was_inactive = not last_ocr.get('tk')
     king_is_now_active = bool(current_ocr.get('tk'))
@@ -132,7 +131,8 @@ def main():
     parser = argparse.ArgumentParser(description="Clash Royale AI — Autonomous Bot & Training")
     parser.add_argument('--mode', type=str, choices=['auto', 'record', 'train'], default='auto',
                         help="Operation mode: 'auto' (24/7 bot), 'record' (human teacher mode), 'train' (offline training)")
-    parser.add_argument('--epochs', type=int, default=5, help="Number of training epochs after each game (or total for train mode)")
+    # BUG-R4 FIX: Use default=None so explicit --epochs 5 is not treated as default
+    parser.add_argument('--epochs', type=int, default=None, help="Number of training epochs after each game (default 5, or 50 for train mode)")
     parser.add_argument('--batch_size', type=int, default=64, help="Batch size for training")
     parser.add_argument('--games', type=int, default=0, help="Number of games to run (0 for infinite 24/7)")
     parser.add_argument('--epsilon', type=float, default=None, help="Exploration rate override (e.g. 0.05 for pure AI, 1.0 for random)")
@@ -151,8 +151,9 @@ def main():
 
     # If pure offline training mode, run training and exit
     if args.mode == 'train':
+        offline_epochs = args.epochs if args.epochs is not None else 50
         with keep_awake():
-            run_offline_training(ai_agent, num_epochs=args.epochs if args.epochs != 5 else 50, batch_size=args.batch_size)
+            run_offline_training(ai_agent, num_epochs=offline_epochs, batch_size=args.batch_size)
         return
 
     scaler = Scaler()
@@ -165,7 +166,7 @@ def main():
 
     # Wrap the entire live gameplay loop inside Windows keep_awake context
     with keep_awake():
-        print(f"🚀 Bot loop initialized in '{args.mode}' mode. Press Ctrl+C to stop.")
+        print(f"[BOT] Bot loop initialized in '{args.mode}' mode. Press Ctrl+C to stop.")
         try:
             while True:
                 # Check for watchdog timeout or stuck popups
@@ -175,7 +176,7 @@ def main():
 
                 if current_state_name == "MAIN_MENU":
                     if args.mode == 'record':
-                        print("🎮 [HUMAN MODE] Main Menu detected. Starting match in 3 seconds (or click Battle yourself)...")
+                        print("[HUMAN MODE] Main Menu detected. Starting match in 3 seconds (or click Battle yourself)...")
                         time.sleep(3)
                     state_manager.start_match()
                     wait_for_state_change(state_manager, "MAIN_MENU")
@@ -193,7 +194,7 @@ def main():
                     time.sleep(2)
                 
                 elif current_state_name == "IN_BATTLE":
-                    print(f"⚔️ Battle in progress ({args.mode.upper()} mode)...")
+                    print(f"Battle in progress ({args.mode.upper()} mode)...")
                     current_game_log = {'steps': []}
                     battle_start_time = time.time()
                     last_state, action = None, None
@@ -218,18 +219,18 @@ def main():
                             current_status=current_status, battle_duration=battle_duration, vision=vision
                         )
                         if has_ended:
-                            print(f"🏁 Battle ended ({end_reason}).")
+                            print(f"[BATTLE] Battle ended ({end_reason}).")
                             battle_has_ended = True
                         elif current_status == "UNKNOWN":
                             consecutive_non_battle += 1
                             if consecutive_non_battle >= 4:  # ~1.8 seconds sustained UNKNOWN
-                                print("🏁 Battle ended (Left IN_BATTLE state).")
+                                print("[BATTLE] Battle ended (Left IN_BATTLE state).")
                                 battle_has_ended = True
                         elif watchdog_res == "BATTLE_TIMEOUT":
-                            print("🏁 Battle ended (Watchdog timeout reached).")
+                            print("[BATTLE] Battle ended (Watchdog timeout reached).")
                             battle_has_ended = True
                         elif battle_duration >= 35 and getattr(vision, 'consecutive_invalid_hand', 0) >= 8:
-                            print("🏁 Battle ended (Card deck absent for sustained duration).")
+                            print("[BATTLE] Battle ended (Card deck absent for sustained duration).")
                             battle_has_ended = True
                         else:
                             consecutive_non_battle = 0
@@ -244,13 +245,18 @@ def main():
                                 current_game_log['steps'], scaler, vision, battle_duration=battle_duration
                             )
 
-                            if current_game_log['steps'] and not args.no_train:
+                            if current_game_log['steps']:
                                 current_game_log['steps'][-1]['reward'] += final_reward
                                 ai_agent.learn_from_game(current_game_log, scaler=scaler)
-                                ai_agent.train(num_epochs=args.epochs, batch_size=args.batch_size)
-                                ai_agent.update_match_stats(match_result, final_reward)
-                            elif args.no_train:
-                                print("🔒 [SAFEGUARD] Training skipped (--no-train flag active).")
+                                if not args.no_train:
+                                    post_epochs = args.epochs if args.epochs is not None else 5
+                                    ai_agent.train(num_epochs=post_epochs, batch_size=args.batch_size)
+                                    ai_agent.update_match_stats(match_result, final_reward)
+                                else:
+                                    # BUG-R5 FIX: Persist replay buffer and update match stats even when post-match training is disabled
+                                    ai_agent.save_buffer()
+                                    ai_agent.update_match_stats(match_result, final_reward)
+                                    print("[SAFEGUARD] Training skipped (--no-train flag active). Replay buffer and match stats saved.")
 
                             matches_completed += 1
                             if args.games > 0 and matches_completed >= args.games:
@@ -302,7 +308,7 @@ def main():
                                 if 0 <= slot < len(battle_coords["cards"]):
                                     box = battle_coords["cards"][slot]
                                     click_x, click_y = box[0] + box[2] // 2, box[1] + box[3] // 2
-                                    print(f"⚡ [PLAY CARD] Executing {rule_name} (Slot {slot} at {pos})")
+                                    print(f"[PLAY CARD] Executing {rule_name} (Slot {slot} at {pos})")
                                     controller.play_card((click_x, click_y), pos, slot=slot)
                                     # Deduct elixir for played card
                                     hand = current_game_state.get('hand', [])
@@ -310,22 +316,28 @@ def main():
                                         c_name = hand[slot]
                                         c_cost = config.CARD_COSTS.get(c_name, 3)
                                         vision.elixir_tracker.deduct(c_cost)
+                                    # BUG-R2 FIX: Record last_state only when action was actually taken
+                                    last_state = current_game_state
                                 else:
-                                    print(f"⚠️ [WARNING] AI predicted invalid card slot: {slot}.")
+                                    print(f"[WARNING] AI predicted invalid card slot: {slot}.")
                                     action = None
-                            
-                            last_state = current_game_state
+                            else:
+                                action = None
                         
                         time.sleep(0.35)
                 time.sleep(1)
 
         except KeyboardInterrupt:
-            print("\n⚠️ Process interrupted by user. Saving model and buffer...")
-            if recorder:
-                recorder.stop()
+            print("\n[WARNING] Process interrupted by user. Saving model and buffer...")
+            # BUG-R3 FIX: Guard against double recorder.stop() on KeyboardInterrupt
+            if recorder and getattr(recorder, 'running', True):
+                try:
+                    recorder.stop()
+                except Exception:
+                    pass
             ai_agent.save()
             ai_agent.save_buffer()
-            print("✅ All weights and replay experiences saved cleanly.")
+            print("[SUCCESS] All weights and replay experiences saved cleanly.")
 
 if __name__ == '__main__':
     main()

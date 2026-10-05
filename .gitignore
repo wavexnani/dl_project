@@ -1,16 +1,26 @@
+# Environments
 venv/
+.venv/
+env/
+
+# Python cache & compiled files
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 *.log
-RoyaleRL/__pycache__/
+RoyaleRL/**/__pycache__/
 
-# Debug images
-RoyaleRL/*debug*.png
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 
-# Preserve presentation plots
+# Ephemeral runtime debug captures (allow calibration benchmarks)
+RoyaleRL/tools_debug/debug_images/debug_screenshot*.png
+
+# Preserve presentation plots and data assets
 !RoyaleRL/presentation/**
-
-# Allow specific training artifacts
-!RoyaleRL/training_stats.json
-!RoyaleRL/replay_buffer.pkl
-
+!RoyaleRL/data/training_stats.json
+!RoyaleRL/data/replay_buffer.pkl
